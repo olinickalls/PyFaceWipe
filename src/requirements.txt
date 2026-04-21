@@ -1,0 +1,8 @@
+torch
+numpy
+scipy
+nibabel
+medio
+scikit-image
+Pillow
+xxhash
