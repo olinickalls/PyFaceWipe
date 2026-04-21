@@ -1,0 +1,2 @@
+recursive-include pyfacewipe/models *.pt
+recursive-include pyfacewipe/surfa/image *.pyx *.h *.c
