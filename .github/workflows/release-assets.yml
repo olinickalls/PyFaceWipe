@@ -34,7 +34,8 @@ jobs:
           CIBW_SKIP: "pp* *-musllinux_* *-win32"
           CIBW_ARCHS_LINUX: "x86_64"
           CIBW_ARCHS_WINDOWS: "AMD64"
-          CIBW_ARCHS_MACOS: "arm64"
+          CIBW_ARCHS_MACOS: "universal2"
+          MACOSX_DEPLOYMENT_TARGET: "12.0"
           CIBW_BUILD_VERBOSITY: "1"
 
       - name: Upload wheel artifacts
