@@ -6,3 +6,44 @@ requires = [
   "Cython>=0.29",
 ]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "PyFaceWipe"
+version = "0.1.1"
+description = "MRI defacer for multiple sequences."
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+  {name = "Oliver Nickalls", email = "oliver.james.nickalls@singhealth.com.sg"},
+]
+requires-python = ">=3.8"
+dependencies = [
+  "torch",
+  "numpy>=1.21",
+  "scipy",
+  "nibabel",
+  "medio",
+  "scikit-image",
+  "Pillow",
+  "xxhash",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Natural Language :: English",
+  "Topic :: Scientific/Engineering",
+]
+
+[project.urls]
+Homepage = "https://doi.org/10.1007/s10334-024-01170-x"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"pyfacewipe" = ["models/*.pt"]
+"pyfacewipe.surfa.image" = ["*.pyx", "*.h"]

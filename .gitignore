@@ -6,6 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
+# Cython-generated C sources (build artifacts — always compiled fresh from .pyx)
+src/**/*.c
+
 # Distribution / packaging
 .Python
 build/
