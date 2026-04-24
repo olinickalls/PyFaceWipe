@@ -22,6 +22,20 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Download model weights from release v0.1.1
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          mkdir -p src/pyfacewipe/models
+          gh release download v0.1.1 \
+            -R "${GITHUB_REPOSITORY}" \
+            -p "synthstrip.1.pt" \
+            -p "synthstrip.nocsf.1.pt" \
+            -D src/pyfacewipe/models
+          ls -lah src/pyfacewipe/models
+
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.22.0
         env:
@@ -31,6 +45,39 @@ jobs:
           CIBW_ARCHS_WINDOWS: "AMD64"
           CIBW_ARCHS_MACOS: "x86_64 arm64"
           CIBW_BUILD_VERBOSITY: "1"
+
+      - name: Verify wheels contain model weights
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          import glob
+          import sys
+          import zipfile
+
+          whls = glob.glob("wheelhouse/*.whl")
+          if not whls:
+              print("No wheels found in wheelhouse/*.whl", file=sys.stderr)
+              sys.exit(1)
+
+          required = {
+              "pyfacewipe/models/synthstrip.1.pt",
+              "pyfacewipe/models/synthstrip.nocsf.1.pt",
+          }
+
+          missing_any = False
+          for whl in whls:
+              with zipfile.ZipFile(whl) as z:
+                  names = set(z.namelist())
+              missing = sorted(required - names)
+              if missing:
+                  missing_any = True
+                  print(f"ERROR: {whl} is missing: {missing}", file=sys.stderr)
+              else:
+                  print(f"OK: {whl} contains model weights")
+
+          sys.exit(1 if missing_any else 0)
+          PY
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
