@@ -30,7 +30,6 @@ jobs:
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.21.3
         env:
-          CIBW_PACKAGE_DIR: "src"
           CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-* cp312-*"
           CIBW_SKIP: "pp* *-musllinux_* *-win32"
           CIBW_ARCHS_LINUX: "x86_64"
@@ -54,13 +53,13 @@ jobs:
       - name: Build source distribution
         run: |
           python -m pip install --upgrade pip build
-          python -m build --sdist src
+          python -m build --sdist .
 
       - name: Upload sdist artifact
         uses: actions/upload-artifact@v4
         with:
           name: sdist
-          path: src/dist/*.tar.gz
+          path: dist/*.tar.gz
 
   publish_release:
     name: Publish GitHub Release
