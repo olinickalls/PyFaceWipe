@@ -12,7 +12,7 @@ jobs:
       fail-fast: false
       matrix:
         # macos-13 is handled in build-legacy-wheels.yml because its
-        # GitHub-hosted runners are intermittently unavailable.
+        # GitHub-hosted runners are no longer available.
         os: [ubuntu-latest, windows-latest, macos-14]
 
     steps:
