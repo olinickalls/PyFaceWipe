@@ -40,10 +40,12 @@ Homepage = "https://doi.org/10.1007/s10334-024-01170-x"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-"pyfacewipe" = ["models/*.pt"]
 "pyfacewipe.surfa.image" = ["*.pyx", "*.h"]
+# Include model weights inside the pyfacewipe package
+pyfacewipe = ["models/*.pt"]
