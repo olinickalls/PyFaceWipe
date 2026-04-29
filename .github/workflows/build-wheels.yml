@@ -1,12 +1,21 @@
 name: Build Wheels
+run-name: Deploy to ${{ inputs.deploy_target }} by @${{ github.actor }}
 
 on:
-  pull_request:
-  workflow_dispatch:
-
+  push:
+    # Sequence of patterns matched against refs/heads
+    branches:
+      - main
+      - v0.*
+      - v1.*
+    tags:
+      - main
+      - v0.*
+      - v1.*
+  
 jobs:
   build_wheels:
-    name: ${{ matrix.os }}
+    name: Building wheels for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -38,7 +47,7 @@ jobs:
             -D src/pyfacewipe/models
           ls -lah src/pyfacewipe/models
 
-      - name: Build wheels
+      - name: Build the modern wheels
         uses: pypa/cibuildwheel@v2.22.0
         env:
           CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-* cp312-*"
