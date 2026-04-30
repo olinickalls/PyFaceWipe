@@ -9,7 +9,7 @@ on:
 
 jobs:
   build_oldmac_wheels:
-    name: ${{ matrix.os }}
+    name: Build Intel MacOs 10.13 wheels
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
