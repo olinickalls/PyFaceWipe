@@ -1,4 +1,5 @@
 import os
+import platform
 from pathlib import Path
 from .synthstrip_class import SynthStrip
 import medio
@@ -31,7 +32,7 @@ class PyFaceWipe:
         self.strip = SynthStrip(
             debug=False, use_gpu=use_gpu, allow_torch_warnings=False, verbose=False
         )
-        self.station_name = os.environ["COMPUTERNAME"]
+        self.station_name = platform.node()
         self.verbose = verbose
 
         if disable_itk_warnings:

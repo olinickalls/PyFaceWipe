@@ -716,7 +716,7 @@ def cast_image(obj, allow_none=True, copy=False):
     try:
         import nibabel as nib
         if isinstance(obj, nib.spatialimages.SpatialImage):
-            data = obj.get_data().copy()
+            data = obj.get_fdata(caching="unchanged").copy()
             geometry = ImageGeometry(data.shape[:3], vox2world=obj.affine)
             return Volume(data, geometry=geometry)
     except ImportError:
@@ -757,7 +757,7 @@ def cast_slice(obj, allow_none=True, copy=False):
     try:
         import nibabel as nib
         if isinstance(obj, nib.spatialimages.SpatialImage):
-            data = obj.get_data().copy()
+            data = obj.get_fdata(caching="unchanged").copy()
             geometry = ImageGeometry(data.shape[:3], vox2world=obj.affine)
             return Slice(data, geometry=geometry)
     except ImportError:
