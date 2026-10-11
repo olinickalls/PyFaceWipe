@@ -20,7 +20,7 @@ requires-python = ">=3.10,<3.13"
 dependencies = [
   "torch>=2.6",
   "numpy>=1.21,<2.0",
-  "scipy>=1.11,<2.0",
+  "scipy==1.15.3",
   "nibabel",
   "medio",
   "scikit-image",
