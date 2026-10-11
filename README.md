@@ -40,7 +40,9 @@ uv run testrun.py
 
 uv picks a supported Python (3.10 - 3.12), installs the right dependencies for your platform,
 compiles the Cython extension, and runs the script. You need a C compiler for the compile
-step (Visual Studio Build Tools on Windows, `build-essential` on Linux, Xcode command line tools on macOS).
+step (Visual Studio Build Tools on Windows, Xcode command line tools on macOS). On Debian/Ubuntu
+(including a fresh WSL install, which has none) run `sudo apt install build-essential` first;
+without it the build fails with `No such file or directory: 'cc'`.
 
 To run the tests: `uv run pytest`
 

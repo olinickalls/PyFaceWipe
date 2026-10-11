@@ -4,7 +4,7 @@ from pyfacewipe import PyFaceWipe
 
 print('Imported pyfacewipe.')
 
-input_path = Path(r"./MRIsrc/3dT1.nii.gz")
+input_path = Path(r"./test/scans_orig/axT2.nii.gz")
 if not input_path.exists():
     raise FileNotFoundError(f'File does not exist: "{input_path}"')
 print(f'Source file/dir {input_path} exists.')
