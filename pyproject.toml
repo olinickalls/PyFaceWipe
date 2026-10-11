@@ -54,6 +54,9 @@ torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 [tool.pytest.ini_options]
 testpaths = ["test"]
 pythonpath = ["."]
+markers = [
+  "slow: end-to-end integration tests using real MRI scans",
+]
 filterwarnings = [
   "ignore:builtin type .* has no __module__ attribute:DeprecationWarning",
 ]

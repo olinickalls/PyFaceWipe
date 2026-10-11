@@ -11,6 +11,7 @@ ORIG_DIR = TEST_DIR / "scans_orig"
 REF_DIR = TEST_DIR / "scans_defaced"
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("name", ["axT2", "3dT1"])
 def test_deface_matches_reference(name, tmp_path):
     src = ORIG_DIR / f"{name}.nii.gz"
