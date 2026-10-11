@@ -340,7 +340,7 @@ class FramedImage(FramedArray):
             coord_rounded = coord.round()
             if np.allclose(coord, coord_rounded, atol=1e-5, rtol=0.0):
                 # compute the slicing coordinates defining the matching grid regions
-                target_start = coord_rounded.astype(np.int)
+                target_start = coord_rounded.astype(int)
                 source_start = np.array([0, 0, 0])
                 target_stop = target_start + source_geom.shape
                 source_stop = source_start + source_geom.shape
@@ -716,7 +716,7 @@ def cast_image(obj, allow_none=True, copy=False):
     try:
         import nibabel as nib
         if isinstance(obj, nib.spatialimages.SpatialImage):
-            data = obj.get_data().copy()
+            data = obj.get_fdata(caching="unchanged").copy()
             geometry = ImageGeometry(data.shape[:3], vox2world=obj.affine)
             return Volume(data, geometry=geometry)
     except ImportError:
@@ -757,7 +757,7 @@ def cast_slice(obj, allow_none=True, copy=False):
     try:
         import nibabel as nib
         if isinstance(obj, nib.spatialimages.SpatialImage):
-            data = obj.get_data().copy()
+            data = obj.get_fdata(caching="unchanged").copy()
             geometry = ImageGeometry(data.shape[:3], vox2world=obj.affine)
             return Slice(data, geometry=geometry)
     except ImportError:

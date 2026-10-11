@@ -2,7 +2,7 @@
 requires = [
   "setuptools>=68",
   "wheel",
-  "numpy>=1.21",
+  "numpy>=1.21,<2.0",
   "Cython>=0.29",
 ]
 build-backend = "setuptools.build_meta"
@@ -16,10 +16,12 @@ license = {text = "MIT"}
 authors = [
   {name = "Oliver Nickalls", email = "oliver.james.nickalls@singhealth.com.sg"},
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.10,<3.13"
 dependencies = [
-  "torch",
-  "numpy>=1.21",
+  # Intel Macs: PyTorch 2.2.2 is the last release with macOS x86_64 wheels.
+  "torch>=2.6; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+  "torch==2.2.2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+  "numpy>=1.21,<2.0",
   "scipy",
   "nibabel",
   "medio",
@@ -33,6 +35,26 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Natural Language :: English",
   "Topic :: Scientific/Engineering",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
+filterwarnings = [
+  "ignore:builtin type .* has no __module__ attribute:DeprecationWarning",
 ]
 
 [project.urls]

@@ -222,7 +222,7 @@ class SynthStrip():
             if self.debug:
                 print('returning nibabel object')
             affine = in_nb_obj.affine
-            out_nb = nib.Nifti1Image(mask.astype(int), affine)
+            out_nb = nib.Nifti1Image(mask.astype(np.int32), affine)
             return out_nb
 
 

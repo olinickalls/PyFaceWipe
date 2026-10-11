@@ -15,14 +15,19 @@ on:
   
 jobs:
   build_wheels:
-    name: Building wheels for ${{ matrix.os }}
+    name: Wheels (${{ matrix.variant }}) for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         # macos-13 is handled in build-legacy-wheels.yml because its
         # GitHub-hosted runners are no longer available.
-        os: [ubuntu-latest, windows-latest, macos-14]
+        # Windows/macOS PyPI torch is CPU-only, so only Linux needs a CUDA variant.
+        include:
+          - {os: ubuntu-latest, variant: cpu}
+          - {os: ubuntu-latest, variant: cuda}
+          - {os: windows-latest, variant: cpu}
+          - {os: macos-14, variant: cpu}
 
     steps:
       - name: Checkout
@@ -32,6 +37,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Select package variant
+        run: python scripts/set_variant.py ${{ matrix.variant }}
 
       - name: Download model weights from release v0.1.1
         shell: bash
@@ -50,12 +58,15 @@ jobs:
       - name: Build the modern wheels
         uses: pypa/cibuildwheel@v2.22.0
         env:
-          CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-* cp312-* cp313-* cp314-*"
+          CIBW_BUILD: "cp310-* cp311-* cp312-*"
           CIBW_SKIP: "pp* *-musllinux_* *-win32"
           CIBW_ARCHS_LINUX: "x86_64"
           CIBW_ARCHS_WINDOWS: "AMD64"
           CIBW_ARCHS_MACOS: "x86_64 arm64"
           CIBW_BUILD_VERBOSITY: "1"
+          CIBW_ENVIRONMENT_LINUX: PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu
+          CIBW_TEST_REQUIRES: pytest ${{ matrix.variant == 'cpu' && 'torch' || '' }}
+          CIBW_TEST_COMMAND: "pytest {project}/test"
 
       - name: Verify wheels contain model weights
         shell: bash
@@ -93,7 +104,7 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ runner.os }}
+          name: wheels-${{ matrix.variant }}-${{ runner.os }}
           path: wheelhouse/*.whl
 
   build_sdist:

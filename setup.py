@@ -11,10 +11,10 @@ cythonize from the .pyx source rather than shipping pre-generated .c files.
 
 import sys
 
+import numpy as np
+from Cython.Build import cythonize
 from setuptools import setup
 from setuptools.extension import Extension
-from Cython.Build import cythonize
-import numpy as np
 
 # Compiler flags: MSVC (Windows) uses /O2; GCC/Clang use -O3 -std=c99.
 if sys.platform == "win32":

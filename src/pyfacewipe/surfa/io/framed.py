@@ -489,7 +489,7 @@ class NiftiArrayIO(protocol.IOProtocol):
             Array object loaded from file.
         """
         nii = self.nib.load(filename)
-        data = nii.get_data()
+        data = nii.get_fdata()
         arr = framed_array_from_4d(atype, data)
         # print(f'NiftiArrayIO arr type: {type(arr)} a squeezed framed array')
         if isinstance(arr, FramedImage):
@@ -792,7 +792,7 @@ class NibabelObjIO(protocol.IOProtocol):
             Array object loaded from file.
         """
         nii = nb_obj
-        data = nii.get_data()
+        data = nii.get_fdata()
         arr = framed_array_from_4d(atype, data)
         # print(f'NibabelObjIO arr type: {type(arr)} a squeezed framed array')
         if isinstance(arr, FramedImage):
