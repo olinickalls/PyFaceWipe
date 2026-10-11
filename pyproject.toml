@@ -51,6 +51,7 @@ torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 
 [tool.pytest.ini_options]
 testpaths = ["test"]
+pythonpath = ["."]
 filterwarnings = [
   "ignore:builtin type .* has no __module__ attribute:DeprecationWarning",
 ]
