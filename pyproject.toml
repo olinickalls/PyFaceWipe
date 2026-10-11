@@ -18,9 +18,7 @@ authors = [
 ]
 requires-python = ">=3.10,<3.13"
 dependencies = [
-  # Intel Macs: PyTorch 2.2.2 is the last release with macOS x86_64 wheels.
-  "torch>=2.6; sys_platform != 'darwin' or platform_machine != 'x86_64'",
-  "torch==2.2.2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+  "torch>=2.6",
   "numpy>=1.21,<2.0",
   "scipy",
   "nibabel",
