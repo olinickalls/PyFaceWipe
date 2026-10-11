@@ -27,7 +27,6 @@ dependencies = [
   "Pillow",
   "pylibjpeg",
   "pylibjpeg-libjpeg",
-  "python-gdcm",
   "xxhash",
 ]
 classifiers = [
