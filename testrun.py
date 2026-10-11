@@ -1,5 +1,7 @@
 from pathlib import Path
+
 from pyfacewipe import PyFaceWipe
+
 print('Imported pyfacewipe.')
 
 input_path = Path(r"./MRIsrc/3dT1.nii.gz")

@@ -26,30 +26,56 @@ Magn Reson Mater Phy (2024).
 ## Prerequisites
 
 Before you begin, ensure you have met the following requirements:
-* You have at least python 3.7
-* Windows, Linux & Mac supported.
+* Python 3.10 - 3.12.
+* Windows, Linux & Mac supported, see [Platform notes](#platform-notes).
+* NumPy 1.x is required (`numpy<2`) because of the vendored `surfa` package.
 
 ## Installation
 
-### New- Wheels coming soon! In the meantime... for Windows on x64
-
-- Download and unpack the source into your project directory
-
-- Install requirements
-```sh
-python -m pip install -r requirements.txt
-```
-
-- Go! (if you are running Windows on x64)
-
-### MacOS and Linux (also a fallback for windows):
-You may need to recompile with Cython:
+PyFaceWipe is managed with [uv](https://docs.astral.sh/uv/). From a checkout, with no other setup:
 
 ```sh
-python -m pip install cython
-python setup.py  build_ext --inplace
+uv run testrun.py
 ```
 
+uv picks a supported Python (3.10 - 3.12), installs the right dependencies for your platform,
+compiles the Cython extension, and runs the script. You need a C compiler for the compile
+step (Visual Studio Build Tools on Windows, `build-essential` on Linux, Xcode command line tools on macOS).
+
+To run the tests: `uv run pytest`
+
+Without uv: `python -m pip install .` (Python 3.10 - 3.12).
+
+## Platform notes
+
+| Platform | Status |
+|---|---|
+| Windows x64 | Supported, tested. |
+| Linux x86_64 | Supported. Needs glibc 2.28 or newer (Ubuntu 20.04+, Debian 10+), which current PyTorch requires. |
+| macOS Apple Silicon | Supported. Wheels are built in CI. |
+| macOS Intel (x86_64) | **Best effort.** Uses PyTorch 2.2.2 (see below). Not tested. |
+
+* NumPy 1.x only (`numpy<2`), so Python 3.13+ is not supported yet. NumPy 2 support depends on updating the vendored `surfa` package. This is due for the next release.
+
+### CPU vs CUDA PyTorch
+
+From a checkout, `uv run` installs the small CPU-only PyTorch on Linux (from `download.pytorch.org/whl/cpu`).
+
+Published packages come in two variants with the same `pyfacewipe` import package (install only one):
+
+| Package | Linux torch | Install |
+|---|---|---|
+| `pyfacewipe` | Not installed automatically (keeps the default install small) | `uv pip install pyfacewipe torch --extra-index-url https://download.pytorch.org/whl/cpu` (or `pip install ...`) |
+| `pyfacewipe-cuda` | Default CUDA build from PyPI (about 3 GB) | `uv pip install pyfacewipe-cuda` (or `pip install ...`) |
+
+On Windows and macOS, PyPI torch is CPU-only, so `pip install pyfacewipe` installs everything.
+
+### macOS Intel
+
+PyTorch stopped publishing macOS x86_64 wheels after 2.2.2, so on Intel Macs `pyproject.toml`
+automatically selects `torch==2.2.2` instead of `torch>=2.6`. The dependency resolution is
+verified, but PyFaceWipe has not been run on an Intel Mac. Please report any problems.
+Use Python 3.10 - 3.12 and install the Xcode command line tools (`xcode-select --install`).
 
 ## Quick Guide
 
