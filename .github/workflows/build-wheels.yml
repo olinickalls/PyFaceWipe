@@ -53,7 +53,8 @@ jobs:
             -R "${GITHUB_REPOSITORY}" \
             -p "synthstrip.1.pt" \
             -p "synthstrip.nocsf.1.pt" \
-            -D src/pyfacewipe/models
+            -D src/pyfacewipe/models \
+            --skip-existing
           ls -lah src/pyfacewipe/models
 
       - name: Build the modern wheels
