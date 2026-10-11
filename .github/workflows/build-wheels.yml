@@ -13,6 +13,9 @@ on:
       - v0.*
       - v1.*
   
+permissions:
+  contents: read
+
 jobs:
   build_wheels:
     name: Wheels (${{ matrix.variant }}) for ${{ matrix.os }}
