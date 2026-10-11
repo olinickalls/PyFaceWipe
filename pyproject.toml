@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "PyFaceWipe"
-version = "0.1.1"
+version = "0.1.2"
 description = "MRI defacer for multiple sequences."
 readme = "README.md"
 license = {text = "MIT"}
