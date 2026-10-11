@@ -5,13 +5,7 @@
 
 - Python version now set at `>=3.10,<3.13`
 
-- PyTorch version 'pinned' at `>=2.6` for everyone except intel macOs (`==2.2.2`)
-
-```
-  # Intel Macs: PyTorch 2.2.2 is the last release with macOS x86_64 wheels.
-  "torch>=2.6; sys_platform != 'darwin' or platform_machine != 'x86_64'",
-  "torch==2.2.2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
-```
+- PyTorch dependency is `torch>=2.6` across supported platforms.
 
 - `os.environ("COMPUTERNAME")` Windows only- changed to `platform.node()`
 
@@ -30,4 +24,3 @@
     - `np.percentile(interpolation=...)` renamed to `method=` (numpy 1.22) and removed (2.0)
 
 - Investigate `scipy.ndimage.find_objects` issue - related to numpy2?
-
