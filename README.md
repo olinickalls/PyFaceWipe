@@ -55,7 +55,6 @@ Without uv: `python -m pip install .` (Python 3.10 - 3.12).
 | Windows x64 | Supported, tested. |
 | Linux x86_64 | Supported. Needs glibc 2.28 or newer (Ubuntu 20.04+, Debian 10+), which current PyTorch requires. |
 | macOS Apple Silicon | Supported. Wheels are built in CI. |
-| macOS Intel (x86_64) | **Best effort.** Uses PyTorch 2.2.2 (see below). Not tested. |
 
 * NumPy 1.x only (`numpy<2`), so Python 3.13+ is not supported yet. NumPy 2 support depends on updating the vendored `surfa` package. This is due for the next release.
 
@@ -71,13 +70,6 @@ Published packages come in two variants with the same `pyfacewipe` import packag
 | `pyfacewipe-cuda` | Default CUDA build from PyPI (about 3 GB) | `uv pip install pyfacewipe-cuda` (or `pip install ...`) |
 
 On Windows and macOS, PyPI torch is CPU-only, so `pip install pyfacewipe` installs everything.
-
-### macOS Intel
-
-PyTorch stopped publishing macOS x86_64 wheels after 2.2.2, so on Intel Macs `pyproject.toml`
-automatically selects `torch==2.2.2` instead of `torch>=2.6`. The dependency resolution is
-verified, but PyFaceWipe has not been run on an Intel Mac. Please report any problems.
-Use Python 3.10 - 3.12 and install the Xcode command line tools (`xcode-select --install`).
 
 ## Quick Guide
 
@@ -117,4 +109,3 @@ python -m pip install -r requirements.txt
 Oliver Nickalls – Oliver.James.Nickalls@SingHealth.com.sg
 
 Distributed for review and research purposes only. Not for commercial use.
-

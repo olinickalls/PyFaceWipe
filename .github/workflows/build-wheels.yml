@@ -20,8 +20,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macos-13 is handled in build-legacy-wheels.yml because its
-        # GitHub-hosted runners are no longer available.
         # Windows/macOS PyPI torch is CPU-only, so only Linux needs a CUDA variant.
         include:
           - {os: ubuntu-latest, variant: cpu}
@@ -62,7 +60,7 @@ jobs:
           CIBW_SKIP: "pp* *-musllinux_* *-win32"
           CIBW_ARCHS_LINUX: "x86_64"
           CIBW_ARCHS_WINDOWS: "AMD64"
-          CIBW_ARCHS_MACOS: "x86_64 arm64"
+          CIBW_ARCHS_MACOS: "arm64"
           CIBW_BUILD_VERBOSITY: "1"
           CIBW_ENVIRONMENT_LINUX: PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu
           CIBW_TEST_REQUIRES: pytest ${{ matrix.variant == 'cpu' && 'torch' || '' }}

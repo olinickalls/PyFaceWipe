@@ -9,20 +9,17 @@ Both ship the identical `pyfacewipe` import package.
 import sys
 from pathlib import Path
 
-LINUX_TORCH = '"torch>=2.6; sys_platform != \'darwin\' or platform_machine != \'x86_64\'",'
-CPU_TORCH = (
-    '"torch>=2.6; sys_platform != \'linux\' and '
-    '(sys_platform != \'darwin\' or platform_machine != \'x86_64\')",'
-)
+TORCH = '"torch>=2.6",'
+CPU_TORCH = '"torch>=2.6; sys_platform != \'linux\'",'
 
 
 def main(variant: str) -> None:
     path = Path("pyproject.toml")
     text = path.read_text(encoding="utf-8")
     if variant == "cpu":
-        if LINUX_TORCH not in text:
+        if TORCH not in text:
             raise SystemExit("torch dependency line not found")
-        text = text.replace(LINUX_TORCH, CPU_TORCH)
+        text = text.replace(TORCH, CPU_TORCH)
     elif variant == "cuda":
         if 'name = "PyFaceWipe"' not in text:
             raise SystemExit("project name line not found")
