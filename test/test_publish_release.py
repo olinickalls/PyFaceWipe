@@ -17,6 +17,13 @@ def build_run(**overrides):
     return {**run, **overrides}
 
 
+def test_only_expected_build_workflows_are_trusted():
+    assert publisher.BUILD_WORKFLOWS == {
+        ".github/workflows/build-wheels.yml",
+        ".github/workflows/build-wheels-and-store-assets.yml",
+    }
+
+
 @pytest.mark.parametrize("workflow", sorted(publisher.BUILD_WORKFLOWS))
 def test_successful_legacy_run(workflow):
     run = build_run(path=workflow + "@refs/heads/main")

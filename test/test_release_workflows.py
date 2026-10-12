@@ -83,6 +83,14 @@ def test_reusable_build_preserves_ci_source_and_all_distributions(workflows):
     ]
     assert any(step.get("name") == "Verify wheels contain model weights" for step in wheels["steps"])
     assert any(step.get("with", {}).get("name") == "release-source" for step in source["steps"])
+    for job, name in (
+        (wheels, "Select package variant"),
+        (wheels, "Build the modern wheels"),
+        (workflow["jobs"]["build_sdist"], "Build sdist"),
+    ):
+        step = next(step for step in job["steps"] if step.get("name") == name)
+        for variable in ("ACTIONS_RUNTIME_TOKEN", "ACTIONS_CACHE_URL", "ACTIONS_RESULTS_URL"):
+            assert step["env"][variable] == ""
 
 
 def test_publisher_retains_tag_serialization_and_permission_propagation(workflows):
