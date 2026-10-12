@@ -17,9 +17,18 @@ def build_run(**overrides):
     return {**run, **overrides}
 
 
-def test_successful_legacy_run():
-    publisher.validate_run(build_run(), "123", "456", "")
-    publisher.validate_source(build_run(), "commit", "v0.1.2", None, "")
+def test_only_expected_build_workflows_are_trusted():
+    assert publisher.BUILD_WORKFLOWS == {
+        ".github/workflows/build-wheels.yml",
+        ".github/workflows/build-wheels-and-store-assets.yml",
+    }
+
+
+@pytest.mark.parametrize("workflow", sorted(publisher.BUILD_WORKFLOWS))
+def test_successful_legacy_run(workflow):
+    run = build_run(path=workflow + "@refs/heads/main")
+    publisher.validate_run(run, "123", "456", "")
+    publisher.validate_source(run, "commit", "v0.1.2", None, "")
 
 
 @pytest.mark.parametrize("overrides", [
@@ -27,23 +36,48 @@ def test_successful_legacy_run():
     {"event": "pull_request"},
     {"status": "in_progress"},
     {"conclusion": "failure"},
+    {"conclusion": "cancelled"},
 ])
-def test_backfill_rejects_invalid_run(overrides):
+@pytest.mark.parametrize("workflow", sorted(publisher.BUILD_WORKFLOWS))
+def test_backfill_rejects_invalid_run(overrides, workflow):
     with pytest.raises(ValueError):
-        publisher.validate_run(build_run(**overrides), "123", "456", "")
+        publisher.validate_run(build_run(**{"path": workflow, **overrides}),
+                               "123", "456", "")
 
 
-def test_dependent_job_can_publish_current_running_build():
-    publisher.validate_run(build_run(status="in_progress", conclusion=None),
+@pytest.mark.parametrize("workflow", sorted(publisher.BUILD_WORKFLOWS))
+def test_dependent_job_can_publish_current_running_build(workflow):
+    run = build_run(path=workflow, status="in_progress", conclusion=None)
+    publisher.validate_run(run,
                            "123", "123", "commit")
     with pytest.raises(ValueError):
-        publisher.validate_run(build_run(status="in_progress", conclusion=None),
-                               "123", "456", "commit")
+        publisher.validate_run(run, "123", "456", "commit")
+    with pytest.raises(ValueError):
+        publisher.validate_run(run, "123", "123", "")
 
 
-def test_manual_build_uses_recorded_source_not_workflow_branch():
+@pytest.mark.parametrize("overrides", [
+    {"path": ".github/workflows/other.yml"},
+    {"path": ".github/workflows/release-assets.yml"},
+    {"event": "pull_request"},
+    {"event": "workflow_run"},
+    {"event": "workflow_call"},
+    {"status": "completed", "conclusion": "failure"},
+    {"status": "completed", "conclusion": "cancelled"},
+])
+@pytest.mark.parametrize("workflow", sorted(publisher.BUILD_WORKFLOWS))
+def test_same_run_exception_does_not_bypass_run_validation(overrides, workflow):
+    run = build_run(**{
+        "path": workflow, "status": "in_progress", "conclusion": None, **overrides,
+    })
+    with pytest.raises(ValueError):
+        publisher.validate_run(run, "123", "123", "commit")
+
+
+@pytest.mark.parametrize("workflow", sorted(publisher.BUILD_WORKFLOWS))
+def test_manual_build_uses_recorded_source_not_workflow_branch(workflow):
     publisher.validate_source(
-        build_run(event="workflow_dispatch", head_sha="main"),
+        build_run(path=workflow, event="workflow_dispatch", head_sha="main"),
         "commit", "v0.1.2", {"sha": "commit", "tag": "v0.1.2"}, "commit",
     )
 
@@ -55,10 +89,15 @@ def test_manual_build_uses_recorded_source_not_workflow_branch():
     (build_run(), {"sha": "commit", "tag": "v0.1.2"}, "other"),
     (build_run(head_sha="other"), {"sha": "commit", "tag": "v0.1.2"}, ""),
     (build_run(), None, "commit"),
+    (build_run(event="workflow_dispatch", head_sha="main"), None, "commit"),
+    (build_run(event="workflow_dispatch"), {"sha": "other", "tag": "v0.1.2"}, "commit"),
+    (build_run(event="workflow_dispatch"), {"sha": "commit", "tag": "v0.1.1"}, "commit"),
 ])
-def test_source_mismatch_is_rejected(run, provenance, sha):
+@pytest.mark.parametrize("workflow", sorted(publisher.BUILD_WORKFLOWS))
+def test_source_mismatch_is_rejected(run, provenance, sha, workflow):
     with pytest.raises(ValueError):
-        publisher.validate_source(run, "commit", "v0.1.2", provenance, sha)
+        publisher.validate_source({**run, "path": workflow}, "commit", "v0.1.2",
+                                  provenance, sha)
 
 
 def make_assets(root):
@@ -147,12 +186,22 @@ def test_missing_or_expired_artifact_fails_before_upload(monkeypatch, expired):
 
 
 @pytest.mark.parametrize("existing_release", [False, True])
-def test_publish_downloads_verified_run_and_handles_draft(monkeypatch, existing_release):
+@pytest.mark.parametrize("current_build", [False, True])
+@pytest.mark.parametrize("workflow", sorted(publisher.BUILD_WORKFLOWS))
+def test_publish_downloads_verified_run_and_handles_draft(
+    monkeypatch, existing_release, current_build, workflow,
+):
     calls = []
     monkeypatch.setattr(publisher, "tag_commit", lambda *args: "commit")
     artifacts = [{"name": name, "expired": False} for name in publisher.ARTIFACTS]
+    run = build_run(path=workflow)
+    if current_build:
+        monkeypatch.setenv("GITHUB_RUN_ID", "123")
+        run.update(event="workflow_dispatch", head_sha="main",
+                   status="in_progress", conclusion=None)
+        artifacts.append({"name": "release-source", "expired": False})
     monkeypatch.setattr(publisher, "api", lambda repo, path:
-                        {"artifacts": artifacts} if "artifacts?" in path else build_run())
+                        {"artifacts": artifacts} if "artifacts?" in path else run)
 
     def gh(*args):
         calls.append(args)
@@ -160,16 +209,22 @@ def test_publish_downloads_verified_run_and_handles_draft(monkeypatch, existing_
             name = args[args.index("--name") + 1]
             root = Path(args[args.index("--dir") + 1])
             root.mkdir()
-            (root / publisher.ARTIFACTS[name].replace("*", name)).write_bytes(b"wheel")
+            if name == "release-source":
+                (root / "release-source.json").write_text(json.dumps({
+                    "sha": "commit", "tag": "v0.1.2",
+                }))
+            else:
+                (root / publisher.ARTIFACTS[name].replace("*", name)).write_bytes(b"wheel")
         if args[0] == "api":
             release = {"tag_name": "v0.1.2", "assets": [{"name": "sdist.tar.gz"}]}
             return json.dumps([[release] if existing_release else []])
         return ""
 
     monkeypatch.setattr(publisher, "gh", gh)
-    publisher.publish("owner/repo", "v0.1.2", "123", draft=True)
+    publisher.publish("owner/repo", "v0.1.2", "123",
+                      source_sha="commit" if current_build else "", draft=True)
     downloads = [call for call in calls if call[:2] == ("run", "download")]
-    assert len(downloads) == 5
+    assert len(downloads) == (6 if current_build else 5)
     assert all(call[2] == "123" for call in downloads)
     creates = [call for call in calls if call[:2] == ("release", "create")]
     assert len(creates) == (0 if existing_release else 1)
@@ -179,13 +234,14 @@ def test_publish_downloads_verified_run_and_handles_draft(monkeypatch, existing_
     assert len(uploads) == (4 if existing_release else 5)
 
 
-def test_moved_tag_fails_before_release_changes(monkeypatch):
+@pytest.mark.parametrize("workflow", sorted(publisher.BUILD_WORKFLOWS))
+def test_moved_tag_fails_before_release_changes(monkeypatch, workflow):
     commits = iter(["commit", "moved"])
     monkeypatch.setattr(publisher, "tag_commit", lambda *args: next(commits))
     monkeypatch.setattr(publisher, "api", lambda repo, path:
                         {"artifacts": [{"name": name, "expired": False}
                                        for name in publisher.ARTIFACTS]}
-                        if "artifacts?" in path else build_run())
+                        if "artifacts?" in path else build_run(path=workflow))
     calls = []
 
     def gh(*args):
