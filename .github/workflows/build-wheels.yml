@@ -1,5 +1,5 @@
 name: Build Wheels
-run-name: Deploy to ${{ inputs.deploy_target }} by @${{ github.actor }}
+run-name: Build wheels for ${{ inputs.release_tag || github.ref_name }} by @${{ github.actor }}
 
 on:
   push:
@@ -9,15 +9,75 @@ on:
       - v0.*
       - v1.*
     tags:
-      - main
-      - v0.*
-      - v1.*
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing version tag to rebuild and publish (for example v0.1.2)
+        required: true
+        type: string
+      replace_existing:
+        description: Replace assets with matching names (default preserves existing assets)
+        default: false
+        type: boolean
+      draft:
+        description: Create new releases as drafts (does not change existing releases)
+        default: false
+        type: boolean
   
 permissions:
   contents: read
 
 jobs:
+  source:
+    name: Resolve build source
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      tag: ${{ steps.source.outputs.tag }}
+    steps:
+      - name: Validate manual tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          [[ "$RELEASE_TAG" == v* ]] && git check-ref-format "refs/tags/$RELEASE_TAG"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require reviewed source for manual rebuilds
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: git merge-base --is-ancestor HEAD "refs/remotes/origin/$DEFAULT_BRANCH"
+      - name: Record build source
+        id: source
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || (startsWith(github.ref, 'refs/tags/v') && github.ref_name) || '' }}
+        run: |
+          SHA="$(git rev-parse HEAD)"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+          Path("release-source.json").write_text(json.dumps({
+              "sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+              "tag": os.environ["RELEASE_TAG"],
+          }))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-source
+          path: release-source.json
+          if-no-files-found: error
+
   build_wheels:
+    needs: source
     name: Wheels (${{ matrix.variant }}) for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -33,6 +93,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -40,6 +103,10 @@ jobs:
           python-version: "3.11"
 
       - name: Select package variant
+        env:
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
         run: python scripts/set_variant.py ${{ matrix.variant }}
 
       - name: Download model weights from release v0.1.1
@@ -60,6 +127,9 @@ jobs:
       - name: Build the modern wheels
         uses: pypa/cibuildwheel@v2.23.4
         env:
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
           CIBW_BUILD: "cp310-* cp311-* cp312-*"
           CIBW_SKIP: "pp* *-musllinux_* *-win32"
           CIBW_ARCHS_LINUX: "x86_64"
@@ -110,15 +180,24 @@ jobs:
         with:
           name: wheels-${{ matrix.variant }}-${{ runner.os }}
           path: wheelhouse/*.whl
+          if-no-files-found: error
 
   build_sdist:
+    needs: source
     name: Source distribution
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
 
       - name: Build sdist
+        env:
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
         run: |
           python -m pip install --upgrade pip build
           python -m build --sdist
@@ -128,3 +207,18 @@ jobs:
         with:
           name: sdist
           path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish_release:
+    needs: [source, build_wheels, build_sdist]
+    if: needs.source.outputs.tag != ''
+    permissions:
+      actions: read
+      contents: write
+    uses: ./.github/workflows/release-assets.yml
+    with:
+      release_tag: ${{ needs.source.outputs.tag }}
+      build_run_id: ${{ github.run_id }}
+      source_sha: ${{ needs.source.outputs.sha }}
+      replace_existing: ${{ inputs.replace_existing || false }}
+      draft: ${{ inputs.draft || false }}

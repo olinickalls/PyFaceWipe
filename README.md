@@ -96,6 +96,59 @@ python -m pip install -r requirements.txt
 ```
 
 
+## Publishing GitHub release assets
+
+These workflows attach distributions to GitHub Releases; they do not publish to PyPI.
+
+### New releases
+
+1. Update `version` in `pyproject.toml`, commit, and create and push the matching
+   version tag (for example `v0.1.3`).
+2. **Build Wheels** builds and tests the CPU wheels for Linux, Windows and macOS,
+   the Linux CUDA wheels, and the source distribution.
+3. Only after all builds succeed, the publishing job creates or updates the
+   tagged release and uploads its distributions. Ordinary branch builds only
+   save Actions artifacts; they do not publish releases.
+
+### Missing assets on an existing release
+
+If artifacts are still available, open **Actions → Release Assets → Run workflow**.
+Select `main` (which contains the current publishing workflow), enter the exact
+`release_tag`, such as `v0.1.2`, and the successful **Build Wheels** `build_run_id`
+(the number in its `/actions/runs/<number>` URL).
+
+The publisher checks that the run belongs to this repository's build workflow,
+succeeded, and built the commit currently referenced by the tag. New builds record
+their checked-out source in a `release-source` artifact; older builds are checked
+against the run's commit. All four wheel artifacts and the source distribution must
+be available and nonempty. Missing/expired artifacts cause an error before any
+release is changed.
+
+Alternatively, download and extract the artifacts from that verified build run
+and attach the missing `.whl` files using the release's **Edit** page.
+
+### Rebuild when artifacts have expired
+
+Open **Actions → Build Wheels → Run workflow**, select `main`, and enter the
+existing `release_tag`. The build checks out that tag's commit, not `main`, then
+builds, tests and publishes its distributions. Manual rebuilds require the tagged
+commit to be reachable from the default branch, so unmerged code cannot run in
+that branch's cache context. Build commands also have Actions runtime/cache
+credentials cleared. The tagged source must support the
+current build steps, including `scripts/set_variant.py` and the package layout.
+Tags predating that build layout may need a version-specific build process.
+Do not move an existing release tag to newer code just to rebuild it.
+
+Both manual workflows preserve existing assets by default. Enable
+`replace_existing` only when deliberately replacing files with matching names.
+The optional `draft` setting applies only when creating a release; it never
+changes an existing release's publication status. Inspect a draft before publishing
+it through GitHub's release UI. Publishing is serialized per release tag, and only
+the publishing job has release-write permission.
+
+If publishing fails after a successful build, rerun the failed publishing job;
+the default missing-only uploads safely resume a partial upload.
+
 ## Release History
 
 * 0.1
