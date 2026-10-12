@@ -8,22 +8,25 @@ on:
       - main
       - v0.*
       - v1.*
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Existing version tag to rebuild and publish (for example v0.1.2)
+        description: Existing version tag to build without publishing (for example v0.1.2)
         required: true
         type: string
-      replace_existing:
-        description: Replace assets with matching names (default preserves existing assets)
-        default: false
-        type: boolean
-      draft:
-        description: Create new releases as drafts (does not change existing releases)
-        default: false
-        type: boolean
+  workflow_call:
+    inputs:
+      release_tag:
+        description: Existing version tag to build
+        required: true
+        type: string
+    outputs:
+      source_sha:
+        description: Immutable commit used for all distributions
+        value: ${{ jobs.source.outputs.sha }}
+      release_tag:
+        description: Tag recorded in the build provenance
+        value: ${{ jobs.source.outputs.tag }}
   
 permissions:
   contents: read
@@ -36,8 +39,8 @@ jobs:
       sha: ${{ steps.source.outputs.sha }}
       tag: ${{ steps.source.outputs.tag }}
     steps:
-      - name: Validate manual tag
-        if: github.event_name == 'workflow_dispatch'
+      - name: Validate release tag
+        if: inputs.release_tag != '' || github.event_name == 'workflow_dispatch'
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
@@ -52,6 +55,11 @@ jobs:
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: git merge-base --is-ancestor HEAD "refs/remotes/origin/$DEFAULT_BRANCH"
+      - name: Verify pushed tag source
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          PUSH_SHA: ${{ github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$(git rev-parse "$PUSH_SHA^{commit}")"
       - name: Record build source
         id: source
         env:
@@ -208,17 +216,3 @@ jobs:
           name: sdist
           path: dist/*.tar.gz
           if-no-files-found: error
-
-  publish_release:
-    needs: [source, build_wheels, build_sdist]
-    if: needs.source.outputs.tag != ''
-    permissions:
-      actions: read
-      contents: write
-    uses: ./.github/workflows/release-assets.yml
-    with:
-      release_tag: ${{ needs.source.outputs.tag }}
-      build_run_id: ${{ github.run_id }}
-      source_sha: ${{ needs.source.outputs.sha }}
-      replace_existing: ${{ inputs.replace_existing || false }}
-      draft: ${{ inputs.draft || false }}

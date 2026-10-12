@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       build_run_id:
-        description: Successful Build Wheels run ID whose artifacts should be uploaded
+        description: Successful wheel build run ID for advanced backfill (either build workflow)
         required: true
         type: string
       replace_existing:

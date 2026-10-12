@@ -1,0 +1,45 @@
+name: Build Wheels and Store Assets
+run-name: Build and store wheels for ${{ inputs.release_tag || github.ref_name }} by @${{ github.actor }}
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing version tag to build and publish (for example v0.1.2)
+        required: true
+        type: string
+      replace_existing:
+        description: Replace assets with matching names (default preserves existing assets)
+        default: false
+        type: boolean
+      draft:
+        description: Create new releases as drafts (does not change existing releases)
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build-wheels.yml
+    with:
+      release_tag: ${{ inputs.release_tag || github.ref_name }}
+
+  publish_release:
+    needs: build
+    permissions:
+      actions: read
+      contents: write
+    uses: ./.github/workflows/release-assets.yml
+    with:
+      release_tag: ${{ needs.build.outputs.release_tag }}
+      build_run_id: ${{ github.run_id }}
+      source_sha: ${{ needs.build.outputs.source_sha }}
+      replace_existing: ${{ inputs.replace_existing || false }}
+      draft: ${{ inputs.draft || false }}

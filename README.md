@@ -104,32 +104,49 @@ These workflows attach distributions to GitHub Releases; they do not publish to 
 
 1. Update `version` in `pyproject.toml`, commit, and create and push the matching
    version tag (for example `v0.1.3`).
-2. **Build Wheels** builds and tests the CPU wheels for Linux, Windows and macOS,
-   the Linux CUDA wheels, and the source distribution.
+2. Pushing a `v*` tag automatically starts **Build Wheels and Store Assets**, which
+   calls **Build Wheels** to build and test the CPU wheels for Linux, Windows and
+   macOS, the Linux CUDA wheels, and the source distribution.
 3. Only after all builds succeed, the publishing job creates or updates the
    tagged release and uploads its distributions. Ordinary branch builds only
    save Actions artifacts; they do not publish releases.
 
-### Missing assets on an existing release
+### Build and store assets for an existing tag
+
+Open **Actions → Build Wheels and Store Assets → Run workflow**, select `main`,
+enter the existing `release_tag` (for example `v0.1.2`), and run. No build run ID
+or source SHA is needed. This creates fresh distributions from the tag's immutable
+commit and uploads those exact artifacts from the same run after every build
+succeeds. The publisher verifies the recorded source against the tag and rejects
+moved tags before changing the release.
+
+**Build Wheels** remains available for standalone builds and normal branch CI.
+Its manual dispatch now builds the selected tag and saves Actions artifacts only;
+it no longer publishes. Tag pushes run only the new orchestration workflow, avoiding
+duplicate builds and uploads.
+
+### Advanced backfill using existing artifacts
 
 If artifacts are still available, open **Actions → Release Assets → Run workflow**.
 Select `main` (which contains the current publishing workflow), enter the exact
-`release_tag`, such as `v0.1.2`, and the successful **Build Wheels** `build_run_id`
+`release_tag`, such as `v0.1.2`, and a successful **Build Wheels** or
+**Build Wheels and Store Assets** `build_run_id`
 (the number in its `/actions/runs/<number>` URL).
 
-The publisher checks that the run belongs to this repository's build workflow,
+The publisher checks that the run belongs to one of this repository's trusted build workflows,
 succeeded, and built the commit currently referenced by the tag. New builds record
 their checked-out source in a `release-source` artifact; older builds are checked
 against the run's commit. All four wheel artifacts and the source distribution must
 be available and nonempty. Missing/expired artifacts cause an error before any
-release is changed.
+release is changed. Supplying a source SHA cannot substitute for missing provenance
+or make artifacts from the wrong commit valid; use a fresh build instead.
 
 Alternatively, download and extract the artifacts from that verified build run
 and attach the missing `.whl` files using the release's **Edit** page.
 
 ### Rebuild when artifacts have expired
 
-Open **Actions → Build Wheels → Run workflow**, select `main`, and enter the
+Open **Actions → Build Wheels and Store Assets → Run workflow**, select `main`, and enter the
 existing `release_tag`. The build checks out that tag's commit, not `main`, then
 builds, tests and publishes its distributions. Manual rebuilds require the tagged
 commit to be reachable from the default branch, so unmerged code cannot run in
@@ -139,7 +156,7 @@ current build steps, including `scripts/set_variant.py` and the package layout.
 Tags predating that build layout may need a version-specific build process.
 Do not move an existing release tag to newer code just to rebuild it.
 
-Both manual workflows preserve existing assets by default. Enable
+Both publishing workflows preserve existing assets by default. Enable
 `replace_existing` only when deliberately replacing files with matching names.
 The optional `draft` setting applies only when creating a release; it never
 changes an existing release's publication status. Inspect a draft before publishing

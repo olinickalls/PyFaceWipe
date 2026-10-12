@@ -16,6 +16,11 @@ ARTIFACTS = {
     "sdist": "*.tar.gz",
 }
 
+BUILD_WORKFLOWS = {
+    ".github/workflows/build-wheels.yml",
+    ".github/workflows/build-wheels-and-store-assets.yml",
+}
+
 
 def gh(*args):
     return subprocess.check_output(["gh", *args], text=True)
@@ -38,11 +43,13 @@ def tag_commit(repo, tag):
 
 
 def validate_run(run, run_id, current_run_id, source_sha):
-    if run["path"].split("@", 1)[0] != ".github/workflows/build-wheels.yml":
-        raise ValueError("Artifacts must come from the Build Wheels workflow")
+    if run["path"].split("@", 1)[0] not in BUILD_WORKFLOWS:
+        raise ValueError("Artifacts must come from a trusted wheel build workflow")
     if run["event"] not in {"push", "workflow_dispatch"}:
         raise ValueError("Artifacts must come from a push or manual build")
-    current_build = run_id == current_run_id and bool(source_sha)
+    current_build = (
+        run_id == current_run_id and bool(source_sha) and run["status"] == "in_progress"
+    )
     if not current_build and (
         run["status"] != "completed" or run["conclusion"] != "success"
     ):
