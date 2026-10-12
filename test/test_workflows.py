@@ -19,6 +19,14 @@ def test_cibuildwheel_references_are_pinned_consistently():
     )
 
 
+def test_wheel_builds_only_run_lightweight_build_tests():
+    workflow = (
+        Path(__file__).resolve().parents[1] / ".github/workflows/build-wheels.yml"
+    ).read_text(encoding="utf-8")
+    assert "CIBW_TEST_COMMAND: 'pytest {project}/test/test_build.py'" in workflow
+    assert "test_end_to_end" not in workflow
+
+
 def test_release_publishing_depends_on_all_builds_and_only_targets_tags():
     workflow = (
         Path(__file__).resolve().parents[1] / ".github/workflows/build-wheels.yml"
