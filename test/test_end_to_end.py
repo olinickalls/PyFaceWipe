@@ -1,10 +1,15 @@
 from pathlib import Path
+import os
 
 import nibabel as nib
 import numpy as np
 import pytest
 
 from pyfacewipe import PyFaceWipe
+
+# Skip this entire module during CI wheel builds (when pytest marker filtering doesn't work reliably)
+if os.getenv("CIBW_BUILD", ""):
+    pytest.skip("Skipping slow end-to-end tests during wheel builds", allow_module_level=True)
 
 TEST_DIR = Path(__file__).parent
 ORIG_DIR = TEST_DIR / "scans_orig"
