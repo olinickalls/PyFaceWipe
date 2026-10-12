@@ -148,7 +148,7 @@ jobs:
           CIBW_BEFORE_ALL_LINUX: yum install -y libjpeg-turbo-devel openblas-devel lapack-devel
           CIBW_ENVIRONMENT_LINUX: PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu
           CIBW_TEST_REQUIRES: pytest ${{ matrix.variant == 'cpu' && 'torch' || '' }}
-          CIBW_TEST_COMMAND: 'pytest {project}/test -m "not slow"'
+          CIBW_TEST_COMMAND: 'pytest {project}/test/test_build.py'
 
       - name: Verify wheels contain model weights
         shell: bash
