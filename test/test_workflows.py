@@ -31,6 +31,8 @@ def test_release_publishing_depends_on_all_builds_and_only_targets_tags():
     assert workflow.count("ref: ${{ needs.source.outputs.sha }}") == 2
     assert workflow.count("if-no-files-found: error") == 3
     assert workflow.count("contents: write") == 1
+    assert 'git merge-base --is-ancestor HEAD "refs/remotes/origin/$DEFAULT_BRANCH"' in workflow
+    assert workflow.count('ACTIONS_RUNTIME_TOKEN: ""') == 3
 
 
 def test_backfill_has_explicit_inputs_and_serialized_publishing():

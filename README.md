@@ -131,7 +131,10 @@ and attach the missing `.whl` files using the release's **Edit** page.
 
 Open **Actions → Build Wheels → Run workflow**, select `main`, and enter the
 existing `release_tag`. The build checks out that tag's commit, not `main`, then
-builds, tests and publishes its distributions. The tagged source must support the
+builds, tests and publishes its distributions. Manual rebuilds require the tagged
+commit to be reachable from the default branch, so unmerged code cannot run in
+that branch's cache context. Build commands also have Actions runtime/cache
+credentials cleared. The tagged source must support the
 current build steps, including `scripts/set_variant.py` and the package layout.
 Tags predating that build layout may need a version-specific build process.
 Do not move an existing release tag to newer code just to rebuild it.
