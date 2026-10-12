@@ -112,6 +112,18 @@ def test_annotated_tag_resolves_to_commit(monkeypatch):
     assert publisher.tag_commit("owner/repo", "v0.1.2") == "commit"
 
 
+def test_tag_path_preserves_hierarchy_and_escapes_url_characters(monkeypatch):
+    paths = []
+
+    def api(repo, path):
+        paths.append(path)
+        return {"object": {"type": "commit", "sha": "commit"}}
+
+    monkeypatch.setattr(publisher, "api", api)
+    assert publisher.tag_commit("owner/repo", "v1.0/rc#1") == "commit"
+    assert paths == ["git/ref/tags/v1.0/rc%231"]
+
+
 @pytest.mark.parametrize("tag", ["main", "vbad tag", "v../invalid"])
 def test_invalid_tag_rejected(tag):
     with pytest.raises((ValueError, publisher.subprocess.CalledProcessError)):

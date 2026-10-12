@@ -29,7 +29,7 @@ def tag_commit(repo, tag):
     subprocess.run(["git", "check-ref-format", f"refs/tags/{tag}"], check=True)
     if not tag.startswith("v"):
         raise ValueError("Release tag must start with v")
-    obj = api(repo, f"git/ref/tags/{quote(tag, safe='')}")["object"]
+    obj = api(repo, f"git/ref/tags/{quote(tag, safe='/')}")["object"]
     while obj["type"] == "tag":
         obj = api(repo, f"git/tags/{obj['sha']}")["object"]
     if obj["type"] != "commit":
