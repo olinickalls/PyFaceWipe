@@ -58,7 +58,7 @@ jobs:
           ls -lah src/pyfacewipe/models
 
       - name: Build the modern wheels
-        uses: pypa/cibuildwheel@v2.22.0
+        uses: pypa/cibuildwheel@v2.23.4
         env:
           CIBW_BUILD: "cp310-* cp311-* cp312-*"
           CIBW_SKIP: "pp* *-musllinux_* *-win32"
