@@ -1,2 +1,3 @@
 recursive-include src/pyfacewipe/models *.pt
 recursive-include src/pyfacewipe/surfa/image *.pyx *.h
+recursive-include src/pyfacewipe/surfa/mesh *.pyx *.h

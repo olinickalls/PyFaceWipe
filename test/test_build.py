@@ -5,10 +5,17 @@ from pathlib import Path
 import pytest
 
 
-def test_cython_extension_is_compiled():
-    interp = importlib.import_module("pyfacewipe.surfa.image.interp")
-    assert interp.__file__.endswith((".pyd", ".so")), (
-        f"interp was not loaded as a compiled extension: {interp.__file__}"
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "pyfacewipe.surfa.image.interp",
+        "pyfacewipe.surfa.mesh.intersection",
+    ],
+)
+def test_cython_extension_is_compiled(module_name):
+    module = importlib.import_module(module_name)
+    assert module.__file__.endswith((".pyd", ".so")), (
+        f"{module_name} was not loaded as a compiled extension: {module.__file__}"
     )
 
 

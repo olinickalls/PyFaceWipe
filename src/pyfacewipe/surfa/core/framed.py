@@ -1,8 +1,21 @@
 from copy import deepcopy
 import numpy as np
 
-from pyfacewipe.surfa.core.array import conform_ndim
+from pyfacewipe.surfa.core.array import conform_ndim, convert_from_tensor
 from pyfacewipe.surfa.core.labels import LabelLookup
+
+
+# mgz now has its intent encoded in the version number
+# version = (intent & 0xffff ) << 8) | MGH_VERSION
+# MGH_VERSION = 1
+class FramedArrayIntents:
+    unknown     = -1
+    mri         = 0
+    label       = 1
+    shape       = 2
+    warpmap     = 3
+    warpmap_inv = 4
+    timeseries  = 5
 
 
 class FramedArray:
@@ -35,7 +48,7 @@ class FramedArray:
         data : array_like
             Internal data array.
         labels : dict or LabelLookup, optional
-            Label name lookup associated with segmentation indicies.
+            Label name lookup associated with segmentation indices.
         metadata : dict, optional
             Dictionary containing arbitrary array metadata.
         """
@@ -48,7 +61,7 @@ class FramedArray:
         self._basedim = basedim
 
         # set data array
-        self.data = data
+        self.data = convert_from_tensor(data)
 
         # initialize and set the private metadata dictionary
         self._metadata = {}
@@ -133,7 +146,44 @@ class FramedArray:
             raise ValueError(f'labels expected LabelLookup object, but got object of type {value.__class__.__name__}')
         else:
             self._metadata['labels'] = value.copy()
+    
+    def compact_labels(self, update_labels=False):
+        """
+        Returns a LabelLookup object containing only the values from the lookup
+        table that are present in the label volume.
 
+        This expects that `self.data` contains only int-like values corresponding
+        to indices in the default `FreeSurferColorLUT.txt`.
+
+        Parameters
+        ----------
+        update_labels : bool
+            If True, updates `self.labels` to the new compacted label lookup.
+
+        Returns
+        -------
+        LabelLookup
+            A label lookup containing only the labels present in the segmentation.
+        """
+        # ensure self.labels is not None
+        assert self.labels is not None, "self.labels is None, must be a LabelLookup"
+        # ensure we're working with a label volume, containing int-like data
+        assert np.issubdtype(self.data.dtype, np.integer), "self.data must be a label volume to compact labels"
+        
+        # create empty LabelLookup
+        compact_labels = LabelLookup()
+        uniq = np.unique(self.data)
+
+        # populate empty LabelLookup with labels present in the volume
+        for i, l_idx in enumerate(uniq):
+            compact_labels[i] = self.labels[l_idx]
+
+        if update_labels:
+            self.labels = compact_labels
+
+        return compact_labels
+
+    
     @property
     def basedim(self):
         """
@@ -264,7 +314,7 @@ class FramedArray:
         """
         pass
 
-    def save(self, filename, fmt=None):
+    def save(self, filename, fmt=None, intent=FramedArrayIntents.mri):
         """
         Write array to file.
 
@@ -276,7 +326,7 @@ class FramedArray:
             Optional file format to force.
         """
         from pyfacewipe.surfa.io.framed import save_framed_array
-        save_framed_array(self, filename, fmt=fmt)
+        save_framed_array(self, filename, fmt=fmt, intent=intent)
 
     def min(self, nonzero=False, frames=False):
         """
@@ -366,7 +416,7 @@ class FramedArray:
         data = self.data
         if nonzero:
             data = data[data.nonzero()]
-        return np.percentile(data, percentiles, interpolation=method)
+        return np.percentile(data, percentiles, method=method)
 
     def clip(self, a_min, a_max):
         """
@@ -404,7 +454,7 @@ class FramedArray:
         """
         return np.unique(self)
 
-    def onehot(self, mapping, dtype=np.uint32):
+    def onehot(self, mapping, dtype=np.int32):
         """
         Convert discrete labels to a one-hot encoded probabilistic map.
 
@@ -424,7 +474,7 @@ class FramedArray:
             raise ValueError(f'cannot onehot-encode labels with more than 1 frame, but array has {self.nframes} frames')
 
         if not np.issubdtype(self.dtype, np.integer):
-            raise ValueError('cannot onehot-encode a non-integer array, got dtype {self.dtype}')
+            raise ValueError(f'cannot onehot-encode a non-integer array, got dtype {self.dtype}')
 
         mapping = np.asarray(mapping)
         if mapping.ndim != 1:
@@ -432,7 +482,7 @@ class FramedArray:
 
         nlabels = len(mapping)
         inttype = np.uint16 if nlabels < np.iinfo(np.uint16).max else np.uint32
-        recoder = np.zeros(self.max() + 1, dtype=inttype)
+        recoder = np.zeros(max(nlabels, self.max() + 1), dtype=inttype)
         recoder[mapping] = np.arange(nlabels)
 
         dsize = self.data.size

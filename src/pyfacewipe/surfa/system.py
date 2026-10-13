@@ -93,7 +93,7 @@ def hostname(short=True):
     return node
 
 
-def vmpeak():
+def vmpeak(pid=None):
     """
     Return the peak memory usage of the process in kilobytes.
 
@@ -101,7 +101,10 @@ def vmpeak():
     """
     # TODO: switch to this (portable across platforms)
     # return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    procstatus = '/proc/self/status'
+    if (pid is None):
+        procstatus = '/proc/self/status'
+    else:
+        procstatus = os.path.join('/proc', str(pid), 'status')
     if os.path.exists(procstatus):
         with open(procstatus, 'r') as file:
             for line in file:
@@ -112,7 +115,7 @@ def vmpeak():
 
 def fatal(message, retcode=1):
     """
-    Print an error message and exits or raises an exception if in interactive mode.
+    Print an error message and exit (or raise an exception if in interactive mode).
 
     Parameters
     ----------
@@ -128,16 +131,6 @@ def fatal(message, retcode=1):
     else:
         raise Exception(message)
 
-def warning(message):
-    """
-    Print a warning message.
-
-    Parameters
-    ----------
-    message : str
-        Message to print
-    """
-    print(f'Warning: {message}')
 
 def readlines(filename):
     """

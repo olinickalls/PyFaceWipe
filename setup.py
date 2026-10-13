@@ -28,6 +28,11 @@ extensions = [
         ["src/pyfacewipe/surfa/image/interp.pyx"],
         extra_compile_args=extra_compile_args,
     ),
+    Extension(
+        "pyfacewipe.surfa.mesh.intersection",
+        ["src/pyfacewipe/surfa/mesh/intersection.pyx"],
+        extra_compile_args=extra_compile_args,
+    ),
 ]
 
 setup(

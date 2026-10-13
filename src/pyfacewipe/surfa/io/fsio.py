@@ -17,8 +17,14 @@ class tags:
     gcamorph_geom = 10
     gcamorph_type = 11
     gcamorph_labels = 12
+    gcamorph_meta = 13    # introduced for mgz warpfield
+    gcamorph_affine = 14  # introduced for mgz warpfield (m3z outputs the same information under xform)
+    gcamorph_geom_plusshear = 15  # information output under gcamorph_geom + shear components
     old_surf_geom = 20
     surf_geom = 21
+    surf_dataspace = 22   # surface tag - surface [x y z] space
+    surf_matrixdata = 23  # surface tag - transform matrix going from surf_dataspace to surf_transformedspace
+    surf_transformedspace = 24  # surface tag - surface [x y z] space after applying the transform matrix
     old_xform = 30
     xform = 31
     group_avg_area = 32
@@ -27,14 +33,22 @@ class tags:
     pedir = 41
     mri_frame = 42
     fieldstrength = 43
+    orig_ras2vox  = 44   # ???
 
 
 # these are FreeSurfer tags that have a
 # buffer with hardcoded length
+# notes:
+# 1. there seems to be some special handling of 'old_xform' for backwards compatibility
+# 2. 'xform' is used in both m3z and mgz, but with different formats.
+#    it is lengthless for m3z, but it has a data-length for mgz
 lengthless_tags = [
     tags.old_surf_geom,
     tags.old_real_ras,
     tags.old_colortable,
+    tags.gcamorph_geom,
+    tags.gcamorph_type,
+    tags.gcamorph_labels
 ]
 
 
@@ -110,7 +124,9 @@ def read_binary_lookup_table(file):
     version = iou.read_bytes(file, '>i4')
     max_id = iou.read_bytes(file, '>i4')
     file_name_size = iou.read_bytes(file, '>i4')
-    file.read(file_name_size).decode('utf-8')
+    # if the file comes from pyfacewipe.surfa.io.fsio.write_binary_lookup_table(), file_name_size = 0.
+    # if the file comes from freesurfer/utils/colortab.cpp::znzCTABwriteIntoBinaryV2(), file_name_size > 0.
+    file.read(file_name_size)#.decode('utf-8')
     
     total = iou.read_bytes(file, '>i4')
     if total < 1:
@@ -141,6 +157,8 @@ def write_binary_lookup_table(file, labels):
     iou.write_bytes(file, -2, '>i4')
     iou.write_bytes(file, max(labels) + 1, '>i4')
     iou.write_bytes(file, 0, '>i4')
+    # filename length is set to 0, here filename associated with Labels is not output.
+    # this is different from freesurfer/utils/colortab.cpp::znzCTABwriteIntoBinaryV2().
     iou.write_bytes(file, len(labels), '>i4')
     for index, element in labels.items():
         iou.write_bytes(file, index, '>i4')
@@ -206,14 +224,17 @@ def image_geometry_to_string(geom):
         valid = 0
         geom = ImageGeometry(shape=(256, 256, 256))
 
+    # the FS-style geometry cannot store shear parameters
+    voxsize, rotation, center = geom.shearless_components()
+
     string  = 'valid = %d\n' % valid
     string += 'filename = none\n'
     string += 'volume = %d %d %d\n' % tuple(geom.shape)
-    string += 'voxelsize = %.15e %.15e %.15e\n' % tuple(geom.voxsize)
-    string += 'xras   = %.15e %.15e %.15e\n' % tuple(geom.rotation[:, 0])
-    string += 'yras   = %.15e %.15e %.15e\n' % tuple(geom.rotation[:, 1])
-    string += 'zras   = %.15e %.15e %.15e\n' % tuple(geom.rotation[:, 2])
-    string += 'cras   = %.15e %.15e %.15e\n' % tuple(geom.center)
+    string += 'voxelsize = %.15e %.15e %.15e\n' % tuple(voxsize)
+    string += 'xras   = %.15e %.15e %.15e\n' % tuple(rotation[:, 0])
+    string += 'yras   = %.15e %.15e %.15e\n' % tuple(rotation[:, 1])
+    string += 'zras   = %.15e %.15e %.15e\n' % tuple(rotation[:, 2])
+    string += 'cras   = %.15e %.15e %.15e\n' % tuple(center)
     return string
 
 

@@ -1,22 +1,28 @@
-import os
 import warnings
 import numpy as np
 
-
+import scipy.ndimage
 from scipy.interpolate import RegularGridInterpolator
+from scipy.ndimage import center_of_mass
+from scipy.ndimage import gaussian_filter
 
+from pyfacewipe.surfa.core import stack
 from pyfacewipe.surfa.core.framed import FramedArray
 from pyfacewipe.surfa.core.array import pad_vector_length
 from pyfacewipe.surfa.core.array import check_array
+from pyfacewipe.surfa.core.array import convert_from_tensor
+from pyfacewipe.surfa.core.slicing import sane_slicing
+from pyfacewipe.surfa.core.slicing import slicing_parameters
+from pyfacewipe.surfa.core.slicing import fit_slicing_to_shape
+from pyfacewipe.surfa.transform import cast_space
 from pyfacewipe.surfa.transform.geometry import ImageGeometry
 from pyfacewipe.surfa.transform.geometry import cast_image_geometry
 from pyfacewipe.surfa.transform.geometry import image_geometry_equal
 from pyfacewipe.surfa.transform import orientation as otn
+from pyfacewipe.surfa.transform.affine import Affine
 from pyfacewipe.surfa.transform.affine import cast_affine
-from pyfacewipe.surfa.image.slicing import sane_slicing
-from pyfacewipe.surfa.image.slicing import slicing_parameters
+from pyfacewipe.surfa.transform.affine import center_to_corner_rotation
 from pyfacewipe.surfa.image.interp import interpolate
-# from interp import interpolate
 
 
 class FramedImage(FramedArray):
@@ -24,7 +30,7 @@ class FramedImage(FramedArray):
     def __init__(self, basedim, data, geometry=None, **kwargs):
         """
         Abstract class defining an ND image array with data frames and associated geometry (i.e. data
-        elements have a mapable relationship to a world-space coordinate system). This base class includes
+        elements have a mappable relationship to a world-space coordinate system). This base class includes
         generic support for 3D and 2D FramedArray classes, which are later defined by Volume and Slice classes.
 
         Parameters
@@ -85,7 +91,7 @@ class FramedImage(FramedArray):
         Parameters
         ----------
         sigma : sigmascalar or sequence of scalars
-            Standard deviation for Gaussian kernel.
+            Standard deviation in mm for Gaussian kernel.
 
         Returns
         -------
@@ -93,12 +99,13 @@ class FramedImage(FramedArray):
             Smoothed image.
         """
         if np.isscalar(sigma):
-            sigma = (*np.repeat(sigma, self.basdim), 0)
+            sigma = (*np.repeat(sigma, self.basedim), 0)
         else:
             sigma = np.asarray(sigma, dtype='float')
             check_array(sigma, ndim=1, shape=[[self.basedim], [self.basedim + 1]], name='sigma')
             sigma = pad_vector_length(sigma, self.basedim + 1, 0, copy=False)
-        from scipy.ndimage import gaussian_filter
+        # make sure to account for the voxel size of the image, since sigma is in mm units
+        sigma = np.asarray(sigma) / (*self.geom.voxsize, 1)
         return self.new(gaussian_filter(self.framed_data, sigma))
 
     def __getitem__(self, index_expression):
@@ -140,7 +147,7 @@ class FramedImage(FramedArray):
         step = pad_vector_length(step, 3, 1)
 
         if np.any(step < 1):
-            raise NotImplementedError('axis flipping is not implemented via cropping, use reorient()')
+            raise NotImplementedError('axes cannot be flipped via cropping, use reorient() instead')
 
         # use the original index_expression to crop the raw array
         cropped_data = self.data[index_expression]
@@ -201,7 +208,7 @@ class FramedImage(FramedArray):
 
         Parameters
         ----------
-        margin : int of sequence of int
+        margin : int or sequence of int
             Add a margin to the bounding box in units of voxels. The margin will not
             extend beyond the base image shape.
 
@@ -212,21 +219,28 @@ class FramedImage(FramedArray):
         """
         mask = self.max(frames=True).data > 0
         if not np.any(mask):
-            return tuple([slice(0, s) for s in mask.shape])
-        from scipy.ndimage import find_objects
-        cropping = find_objects(mask)[0]
-        if margin is not None:
-            margin = np.repeat(margin, self.basedim) if np.isscalar(margin) else np.asarray(margin)
-            check_array(margin, ndim=1, shape=self.basedim, name='bbox margin')
-            if not np.issubdtype(margin.dtype, np.integer):
-                raise ValueError('only integers can be used for valid bbox margins')
-            start = [max(0, c.start - margin[i]) for i, c in enumerate(cropping)]
-            stop  = [min(self.baseshape[i], c.stop + margin[i]) for i, c in enumerate(cropping)]
-            step  = [c.step for c in cropping]
-            cropping = tuple([slice(*s) for s in zip(start, stop, step)])
-        return cropping
+            return tuple(slice(0, s) for s in mask.shape)
 
-    def crop_to_bbox(self, margin=None):
+        if margin is None:
+            margin = 0
+
+        if np.isscalar(margin):
+            margin = [margin] * self.basedim
+
+        margin = np.asarray(margin)
+        check_array(margin, ndim=1, shape=self.basedim, name='bbox margin')
+        if not np.issubdtype(margin.dtype, np.integer):
+            raise TypeError('bbox margin has non-integer type')
+
+        ind = np.nonzero(mask)
+        low = np.min(ind, axis=-1)
+        upp = np.max(ind, axis=-1)
+
+        low = (max(i - m, 0) for i, m in zip(low, margin))
+        upp = (min(i + m, d - 1) for i, m, d in zip(upp, margin, self.baseshape))
+        return tuple(slice(a, b + 1) for a, b in zip(low, upp))
+
+    def crop_to_bbox(self, margin=None, crop_like=None):
         """
         Crop to the bounding box of image data greater than zero.
 
@@ -235,14 +249,45 @@ class FramedImage(FramedArray):
         margin : int of sequence of int
             Add a margin to the bounding box in units of voxels. The margin will not
             extend beyond the base image shape.
+        crop_like : list of FramedImages
+            A list of volumes that will be cropped to the same bounding box as self
 
         Returns
         -------
         cropped : !class
             Cropped image with updated geometry.
         """
-        return self[self.bbox(margin=margin)]
+        if crop_like is not None:
+            cropping = self.bbox(margin=margin)
+            boxed = [self[cropping]]
+            for framed in crop_like:
+                boxed.append(framed[cropping])
+            return boxed
+        else:
+            return self[self.bbox(margin=margin)]
 
+        
+    """
+    surfa.Volume.resize() and freesurfer MRIupsampledN()/MRIdownsampleN() works differently.
+    
+    surfa.Volume.resize() logic:
+    1. keep the original image 'rotation' and 'center' parameters when computing the resampled image geom
+    2. resampled image crs0 remains the same as originial image. This may cause all voxels to be interpolated
+    3. force the originial and resampled image in the same RAS space when computing target-source vox2vox matrix
+    4. by default, 'linear' interpolation method is used
+ 
+    MRIupsampledN()/MRIdownsampleN() logic:
+    1. the RAS of a voxel is at the center of the voxel, so the image corner is located at CRS = [-.5 -.5 -.5]
+    2. the center of the resampled image crs0 = -0.5 + 1.0 / (2 * factor) in originial image voxel space (generally used in FS code)
+    3. the original and resampled images share the same RAS space (implicit)
+    4. the resampled image p0ras can be computed as p0ras = aff_orig @ crs0
+    5. re-compute the resampled image 'center' parameters after correcting p0ras of aff_resampled
+    6. The way the offset/center is set up, some voxels will fall in the same spot as the original volume which means they will not have any interpolation effects. 
+ 
+    The target vox2ras from pyfacewipe.surfa.Volume.resize() and freesurfer MRIupsampledN()/MRIdownsampleN() are different, 
+    but they share the same RAS space. Because the resulting target-source vox2vox is different, surfa.Volume.resize() 
+    interpolates the voxel values from locations that are different from MRIupsampledN()/MRIdownsampleN().
+    """
     def resize(self, voxsize, method='linear', copy=True):
         """
         Reslice image to a specified voxel size.
@@ -262,7 +307,8 @@ class FramedImage(FramedArray):
             Resized image with updated geometry.
         """
         if self.basedim == 2:
-            raise NotImplementedError('resize() is not yet implemented for 2D data, contact andrew if you need this')
+            raise NotImplementedError('resize() is not yet implemented for 2D data, '
+                                      'contact andrew if you need this')
 
         if np.isscalar(voxsize):
             # deal with a scalar voxel size input
@@ -281,6 +327,11 @@ class FramedImage(FramedArray):
         target_shape = np.asarray(self.geom.voxsize, dtype='float') * baseshape3D / voxsize
         target_shape = tuple(np.ceil(target_shape).astype(int))
 
+        """
+        'target_geom' is computed differently than freesurfer MRIupsampledN()/MRIdownsampleN().
+        The resulting target-source vox2vox is different. surfa.Volume.resize() interpolates 
+        the voxel values from locations that are different from MRIupsampledN()/MRIdownsampleN()
+        """
         target_geom = ImageGeometry(
             shape=target_shape,
             voxsize=voxsize,
@@ -340,7 +391,7 @@ class FramedImage(FramedArray):
             coord_rounded = coord.round()
             if np.allclose(coord, coord_rounded, atol=1e-5, rtol=0.0):
                 # compute the slicing coordinates defining the matching grid regions
-                target_start = coord_rounded.astype(int)
+                target_start = coord_rounded.astype(np.int64)
                 source_start = np.array([0, 0, 0])
                 target_stop = target_start + source_geom.shape
                 source_stop = source_start + source_geom.shape
@@ -353,7 +404,7 @@ class FramedImage(FramedArray):
                 target_stop -= delta
                 source_stop -= delta
 
-                # convert to actual array slicings
+                # convert to actual array slices
                 target_slicing = tuple([slice(a, b) for a, b in zip(target_start, target_stop)])
                 source_slicing = tuple([slice(a, b) for a, b in zip(source_start, source_stop)])
 
@@ -363,27 +414,26 @@ class FramedImage(FramedArray):
                 return self.new(target_data, target_geom)
 
         # otherwise just do the standard interpolation with the computed affine
-        # print('\tFramedImage.resample_like:  interpolate inputs:')
-        # print(f'\t\tself.framed_data: {self.framed_data.dtype}')
-        # print(f'\t\ttarget_geom.shape: {target_geom.shape.dtype}')
-        # print(f'\t\tmethod: {type(method)} {method}')
-        # print(f'\t\taffine.matrix: {affine.matrix.dtype}')
-        # print(f'\t\tfill: {type(fill)} {fill}')
-
         interped = interpolate(source=self.framed_data, target_shape=target_geom.shape,
                                method=method, affine=affine.matrix, fill=fill)
         return self.new(interped, target_geom)
 
-    def transform(self, affine=None, disp=None, method='linear', rotation='corner', resample=True, fill=0):
+    def transform(self, trf=None, method='linear', rotation='corner', resample=True, fill=0):
         """
-        Apply a transform.
+        Apply an affine or non-linear transform.
+
+        **The original implementation has been moved to Affine.transform and Warp.transform.
+        **The method is now impemeted to transform image using Affine.transform and Warp.transform.
+
+        **Note on trf argument:** It accepts Affine/Warp object, or deformation fields (4D numpy array).
+        Pass trf argument as a numpy array is deprecated and will be removed in the future.
+        It is assumed that the deformation fields represent a *displacement* vector field in voxel space.
+        So under the hood, images will be moved into the space of the deformation field if the image geometries differ.
 
         Parameters
         ----------
-        affine : Affine
-            Affine (linear) transform to apply.
-        disp : !class
-            Non-linear transform to apply, in the form of a displacement vector field.
+        trf : Affine/Warp or !class
+            Affine transform or nonlinear deformation (displacement) to apply to the image.
         method : {'linear', 'nearest'}
             Image interpolation method if resample is enabled.
         rotation : {'corner', 'center'}
@@ -401,48 +451,32 @@ class FramedImage(FramedArray):
             Transformed image.
         """
         if self.basedim == 2:
-            raise NotImplementedError('transform() is not yet implemented for 2D data, contact andrew if you need this')
+            raise NotImplementedError('transform() is not yet implemented for 2D data, '
+                                      'contact andrew if you need this')
 
-        if not resample and disp is not None:
-            raise ValueError('resampling must be enabled if transforming image with displacement field')
+        image = self.copy()
+        if isinstance(trf, Affine):
+            return trf.transform(image, method, rotation, resample, fill)
 
-        # if not resampling, just change the image vox2world matrix and return
-        if not resample and affine is not None:
-            affine = cast_affine(affine)
-            transformed = self.copy()
-            # if affine is missing geometry info, let's just assume it's in world space
-            if affine.source is not None and affine.target is not None:
-                affine = affine.convert(space='world', source=self)
-            elif affine.space is not None and affine.space != 'world':
-                raise ValueError('affine must contain source and target info if not in world space')
-            # apply forward transform to the header
-            transformed.geom.vox2world = affine @ transformed.geom.vox2world
-            return transformed
+        from pyfacewipe.surfa.transform.warp import Warp
+        if isinstance(trf, np.ndarray):
+            warnings.warn('The option to pass \'trf\' argument as a numpy array is deprecated. '
+                          'Pass \'trf\' as either an Affine or Warp object',
+                          DeprecationWarning, stacklevel=2)
 
-        # sanity check and preprocess the affine if resampling
-        matrix = None
-        if affine is not None:
-            affine = cast_affine(affine)
-            target_geom = self.geom
-            # TODO it should be assumed that the default affine space is 'voxel' when source and target are set
-            if affine.space is not None:
-                if affine.source is not None and affine.target is not None:
-                    affine = affine.convert(space='voxel', source=self)
-                    target_geom = affine.target
-                elif affine.space != 'voxel':
-                    raise ValueError("affine must contain source and target info if coordinate space is not 'voxel'")
-            # make sure the matrix is actually inverted since we want a target to source voxel mapping for resampling
-            matrix = affine.inv().matrix
+            deformation = cast_image(trf, fallback_geom=self.geom)
+            image = image.resample_like(deformation)
+            trf = Warp(data=trf,
+                       source=image.geom,
+                       target=deformation.geom,
+                       format=Warp.Format.disp_crs)
 
-        # get displacement data
-        disp_data = disp.data if disp is not None else None
+        if isinstance(trf, Warp):
+            return trf.transform(image, method, fill)
 
-        # do the interpolation
-        interped = interpolate(source=self.framed_data, target_shape=target_geom.shape, method=method,
-                               affine=matrix, disp=disp_data,  rotation=rotation, fill=fill)
-        return self.new(interped, target_geom)
+        raise ValueError("Pass \'trf\' as either an Affine or Warp object")
 
-    def reorient(self, orientation, copy=True):
+    def reorient(self, orientation, copy=True, inplace=False):
         """
         Realigns image data and world matrix to conform to a specific slice orientation.
 
@@ -452,6 +486,8 @@ class FramedImage(FramedArray):
             Case-insensitive orientation string.
         copy : bool
             Return copy of image even if target orientation is already satisfied.
+        inplace : bool
+            Reorient the image data in place if it is True.
 
         Returns
         -------
@@ -459,7 +495,8 @@ class FramedImage(FramedArray):
             Reoriented image.
         """
         if self.basedim == 2:
-            raise NotImplementedError('reorient() is not yet implemented for 2D data, contact andrew if you need this')
+            raise NotImplementedError('reorient() is not yet implemented for 2D data, '
+                                      'contact andrew if you need this')
 
         trg_orientation = orientation.upper()
         src_orientation = otn.rotation_matrix_to_orientation(self.geom.vox2world.matrix)
@@ -474,19 +511,44 @@ class FramedImage(FramedArray):
         world_axes_src = get_world_axes(src_matrix[:self.basedim, :self.basedim])
 
         voxsize = np.asarray(self.geom.voxsize)
-        voxsize = voxsize[world_axes_src][world_axes_trg]
+        voxsize_swapped = np.ones(self.basedim)
+        for i in range(self.basedim):
+            c1 = trg_orientation[i]
+            for j in range(self.basedim):
+                c2 = src_orientation[j]
+                if ((c1 in 'RL' and c2 in 'RL') or
+                    (c1 in 'AP' and c2 in 'AP') or
+                    (c1 in 'SI' and c2 in 'SI')):
+                    voxsize_swapped[i] = voxsize[j]
+                    break
+        voxsize = voxsize_swapped
 
         # initialize new
-        data = self.data.copy()
-        affine = self.geom.vox2world.matrix.copy()
+        if (not inplace):
+            data = self.data.copy()
+            affine = self.geom.vox2world.matrix.copy()
+        else:
+            data = self.data
+            self.geom.vox2world.matrix.flags.writeable = True
+            affine = self.geom.vox2world.matrix            
 
         # align axes
         affine[:, world_axes_trg] = affine[:, world_axes_src]
         for i in range(self.basedim):
             if world_axes_src[i] != world_axes_trg[i]:
                 data = np.swapaxes(data, world_axes_src[i], world_axes_trg[i])
-                swapped_axis_idx = np.where(world_axes_src == world_axes_trg[i])
-                world_axes_src[swapped_axis_idx], world_axes_src[i] = world_axes_src[i], world_axes_src[swapped_axis_idx]
+                # NumPy 2.x no longer supports mixed scalar/sequence tuple-assignment
+                # with np.where tuple indexing here, so resolve a scalar index first.
+                swapped_axis_idx = np.where(world_axes_src == world_axes_trg[i])[0]
+                if swapped_axis_idx.size == 0:
+                    raise RuntimeError(
+                        "Failed to resolve source axis during reorientation."
+                    )
+                swapped_axis = int(swapped_axis_idx[0])
+                world_axes_src[swapped_axis], world_axes_src[i] = (
+                    world_axes_src[i],
+                    world_axes_src[swapped_axis],
+                )
 
         # align directions
         dot_products = np.sum(affine[:3, :3] * trg_matrix[:3, :3], axis=0)
@@ -496,21 +558,29 @@ class FramedImage(FramedArray):
                 affine[:, i] = - affine[:, i]
                 affine[:3, 3] = affine[:3, 3] - affine[:3, i] * (data.shape[i] - 1)
 
-        # update geometry
-        target_geom = ImageGeometry(
-            shape=data.shape[:3],
-            vox2world=affine,
-            voxsize=voxsize)
-        return self.new(data, target_geom)
+        if (not inplace):
+            # update geometry
+            target_geom = ImageGeometry(
+                shape=data.shape[:3],
+                vox2world=affine,
+                voxsize=voxsize)
+            return self.new(data, target_geom)
+        else:
+            self.geom = ImageGeometry(shape=data.shape[:3], voxsize=voxsize, vox2world=affine)
+            self.data = data
+            return self
 
-    def reshape(self, shape, copy=True):
+
+    def reshape(self, shape, center='image', copy=True):
         """
-        Returns a volume fit to a given shape. Image will be centered in the conformed volume.
+        Returns a volume fit to a given shape. Image will be centered in the conformed volume, or bbox of the original image.
 
         Parameters
         ----------
         shape : tuple of int
             Target shape.
+        center : str
+            Center the reshaped image on image center or bbox: ['image', 'bbox']
         copy : bool
             Return copy of image even if target shape is already satisfied.
 
@@ -520,12 +590,26 @@ class FramedImage(FramedArray):
             Reshaped image.
         """
         if self.basedim == 2:
-            raise NotImplementedError('reshape is not yet implemented for 2D data, contact andrew if you need this')
+            raise NotImplementedError('reshape is not yet implemented for 2D data, '
+                                      'contact andrew if you need this')
 
         shape = shape[:self.basedim]
 
         if np.array_equal(self.baseshape, shape):
             return self.copy() if copy else self
+
+        # validate 'center'
+        valid_centers = ['image', 'bbox']
+        if center not in valid_centers:
+            raise ValueError(f'Unsupported argument for "center", must be in {valid_centers}')
+
+        if center == 'bbox':
+            # get the bbox
+            c_bbox = self.bbox()
+            # reshape the bbox to the target size
+            bbox_centered_cropping = fit_slicing_to_shape(c_bbox, self.baseshape, shape)
+            # return the bbox centered cropping
+            return self[bbox_centered_cropping]
 
         delta = (np.array(shape) - np.array(self.baseshape)) / 2
         low = np.floor(delta).astype(int)
@@ -562,7 +646,7 @@ class FramedImage(FramedArray):
 
     def fit_to_shape(self, shape, center=None, copy=True):
         """
-        This is an alias to `reshape()` for backwards compatability.
+        This is an alias to `reshape()` for backwards compatibility.
 
         Parameters
         ----------
@@ -578,11 +662,9 @@ class FramedImage(FramedArray):
         arr : !class
             Reshaped image.
         """
-        if center is not None:
-            warnings.warn('fit_to_shape center argument no longer has any effect')
-        return self.reshape(shape, copy)
+        return self.reshape(shape, center, copy)
 
-    def conform(self, shape=None, voxsize=1.0, orientation='LIA', method='linear', dtype=None, copy=True):
+    def conform(self, shape=None, voxsize=None, orientation=None, dtype=None, method='linear', copy=True):
         """
         Conforms image to a specific shape, type, resolution, and orientation.
 
@@ -606,8 +688,11 @@ class FramedImage(FramedArray):
         arr : !class
             Conformed image.
         """
-        conformed = self.reorient(orientation, copy=False)
-        conformed = conformed.resize(voxsize, method=method, copy=False)
+        conformed = self
+        if orientation is not None:
+            conformed = conformed.reorient(orientation, copy=False)
+        if voxsize is not None:
+            conformed = conformed.resize(voxsize, method=method, copy=False)
         if shape is not None:
             conformed = conformed.reshape(shape, copy=False)
         if dtype is not None:
@@ -642,6 +727,216 @@ class FramedImage(FramedArray):
                                          bounds_error=bounds_error, fill_value=fill)
         sampled = interp(points)
         return sampled
+
+    def dilate(self, steps, kernel=None, mask=None):
+        """
+        Dilate binary image data.
+
+        Parameters
+        ----------
+        steps : int
+            Number of dilation steps.
+        kernel : array
+            Dilation kernel.
+        mask : array
+            Mask to apply dilation to.
+
+        Returns
+        -------
+        dilated : Image
+        """
+        return self.new(scipy.ndimage.binary_dilation(self.data, iterations=steps, structure=kernel, mask=mask))
+
+    def erode(self, steps, kernel=None, mask=None):
+        """
+        Erode binary image data.
+
+        Parameters
+        ----------
+        steps : int
+            Number of erosion steps.
+        kernel : array
+            Erosion kernel.
+        mask : array
+            Mask to apply erosion to.
+
+        Returns
+        -------
+        eroded : Image
+        """
+        return self.new(scipy.ndimage.binary_erosion(self.data, iterations=steps, structure=kernel, mask=mask))
+
+    def barycenters(self, labels=None, space='image'):
+        """
+        Compute barycenters of the image data. If labels are not provided, the barycenter of each
+        full image frame are returned.
+
+        Parameters
+        ----------
+        labels : int or array of int
+            Label values to compute barycenters for.
+        space : Space
+            Coordinate space of computed barycenters.
+
+        Returns
+        -------
+        points : array of float
+            Barycenter points. If $L$ labels are specified, the output will be of shape $(L, D)$,
+            where $D$ is the dimension of the image. If the number of image frames $F$ is greater than
+            one, the barycenter array will be of shape $(F, L, D)$.
+        """
+        if labels is not None:
+
+            if not np.issubdtype(self.dtype, np.integer):
+                raise ValueError('expected int dtype for computing barycenters on 1D, '
+                                 f'but got dtype {self.dtype}')
+            weights = np.ones(self.baseshape, dtype=np.float32)
+            centers = [center_of_mass(weights, self.framed_data[..., i], labels) for i in range(self.nframes)]
+        else:
+
+            centers = [center_of_mass(self.framed_data[..., i]) for i in range(self.nframes)]
+
+
+        centers = np.squeeze(centers)
+
+        space = cast_space(space)
+        if space != 'image':
+            centers = self.geom.affine('image', space)(centers)
+        return centers
+
+    def connected_components(self):
+        """
+        Find all connected components in the image data.
+
+        Returns
+        -------
+        components : !class
+            Label map of all individual connected components. The order of these labels is arbitrary.
+        """
+        cc = [self.new(scipy.ndimage.label(self.framed_data[..., i])[0]) for i in range(self.nframes)]
+        return stack(cc)
+
+    def connected_component_mask(self, k=1, fill=False):
+        """
+        Compute a mask corresponding to the top $k$ largest connected components in the image data.
+
+        Parameters
+        ----------
+        k : int
+            Top $k$ largest connected components to include in the mask.
+        fill : bool
+            Binary fill all holes in the computed mask.
+
+        Returns
+        -------
+        masks : !class
+            Binary mask of the connected component.
+        """
+        cc = self.connected_components()
+        bincounts = [np.bincount(cc.framed_data[..., i].flat)[1:] for i in range(cc.nframes)]
+        topk = [(-bc).argsort()[:k] + 1 for bc in bincounts]
+        mask = [np.isin(cc.framed_data[..., i], topk[i]) for i in range(self.nframes)]
+        if fill:
+            mask = [scipy.ndimage.binary_fill_holes(m) for m in mask]
+        return stack([self.new(m) for m in mask])
+
+    def distance(self):
+        """
+        Compute the distance transform representing distances outside the binary object.
+
+        See Also
+        --------
+        signed_distance : Compute the signed distance transform.
+
+        Returns
+        -------
+        sdt : !class
+        """
+        sampling = self.geom.voxsize[:self.basedim]
+        dt = lambda x: scipy.ndimage.distance_transform_edt(1 - x, sampling=sampling)
+        return stack([self.new(dt(self.framed_data[..., i])) for i in range(self.nframes)])
+
+    def signed_distance(self):
+        """
+        Compute the signed distance transform of the binary image. Negative values represent
+        distances inside the binary object, and positive values represent distances outside the object.
+
+        See Also
+        --------
+        signed_distance : Compute the distance transform outside the binary object.
+
+        Returns
+        -------
+        sdt : !class
+        """
+        sampling = self.geom.voxsize[:self.basedim]
+        dt = lambda x: scipy.ndimage.distance_transform_edt(x, sampling=sampling)
+        sdt = lambda x: dt(1 - x) - dt(x)
+        return stack([self.new(sdt(self.framed_data[..., i])) for i in range(self.nframes)])
+    
+    def extract_sub_images(self, sub_shape):
+        """
+        Extract a list of sub images from the FramedImage with shape 'sub_shape'
+
+        Parameters
+        ----------
+        sub_shape : array like
+            Shape to be given to the sub images that are extracted
+
+        Returns
+        -------
+        list of FramedImages
+            sub images
+        """
+        
+        # ensure valid shape for the sub images
+        if len(sub_shape) != self.basedim:
+            raise ValueError('Image and sub_shape must have same dimensions')
+
+        img_shape = np.array(self.shape)
+        sub_shape = np.array(sub_shape)
+
+        # find number of slices to take in each dim
+        to_slice = img_shape // sub_shape
+        
+        # get the the 'ordered pairs' of all croppings
+        indices = [len(range(int(to_slice[d]))) for d in range(len(img_shape))]
+        
+        sub_volumes = []
+        # extract all the sub images
+        for idx in np.ndindex(*indices):
+            slices = tuple(slice(sub_shape[d] * idx[d], sub_shape[d] * (idx[d] + 1)) for d in range(len(sub_shape)))
+            sub_volumes.append(self[slices])
+    
+        return sub_volumes
+
+
+    def erase_hemi(self, aseg, thresh=1, hemi="lh"):
+        cc_coords = np.where((aseg.data >= 251) * (aseg.data <= 255)) 
+        cmat = np.array([[x, y, z] for x, y, z in zip(cc_coords[0], cc_coords[1], cc_coords[2])])
+        cc_center = cmat.mean(axis=0)
+        
+        cov = np.cov(np.swapaxes(cmat, 0, 1))
+        eig = np.linalg.eig(cov)
+        eigvec_norm = np.real(eig[1]) / np.linalg.norm(eig[1])
+        eig_norm = np.real(eig[0])
+        plane_norm = eigvec_norm[-1] / np.linalg.norm(eigvec_norm[-1])
+        if plane_norm[np.argmax(abs(plane_norm))] < 0:
+            plane_norm *= -1   # dir of eigvec is otherwise arbitrary
+
+        all_coords = np.where(self.data >= 0)
+        x0, y0, z0 = cc_center
+        all_cmat = np.array([[x-x0, y-y0, z-z0] \
+            for x, y, z in zip(all_coords[0], all_coords[1], all_coords[2])])
+        nx, ny, nz = plane_norm
+        dots = np.array([dx*nx + dy*ny + dz*nz for dx, dy, dz in all_cmat])
+
+        if (hemi == "lh"):
+           mask = np.reshape(dots, self.shape) <= thresh 
+        else:
+           mask = np.reshape(dots, self.shape) >= thresh
+
+        return self.new((self.data * mask))
 
 
 class Slice(FramedImage):
@@ -684,7 +979,7 @@ class Volume(FramedImage):
         super().__init__(basedim=3, data=data, geometry=geometry, labels=labels, metadata=metadata)
 
 
-def cast_image(obj, allow_none=True, copy=False):
+def cast_image(obj, allow_none=True, copy=False, fallback_geom=None):
     """
     Cast object to `Volume` or `Slice` type.
 
@@ -696,6 +991,8 @@ def cast_image(obj, allow_none=True, copy=False):
         Allow for `None` to be successfully passed and returned by cast.
     copy : bool
         Return copy if object is already the correct type.
+    fallback_geom : ImageGeometry
+        Geometry to use if the input object does not have any, e.g. like a numpy array.
 
     Returns
     -------
@@ -708,15 +1005,28 @@ def cast_image(obj, allow_none=True, copy=False):
     if isinstance(obj, FramedImage):
         return obj.copy() if copy else obj
 
-    if getattr(obj, '__array__', None) is not None:
-        return Volume(np.array(obj))
+    if hasattr(obj, 'detach') and hasattr(obj, 'numpy'):
+        obj = convert_from_tensor(obj)
 
-    # as a final test, check if the input is possibly a nibabel image
-    # we don't want nibabel to be required though, so ignore import errors
+    if getattr(obj, '__array__', None) is not None:
+        return Volume(np.array(obj), geometry=fallback_geom)
+
+    # check if the input is a voxel volume
+    try:
+        import voxel as vx
+        if isinstance(obj, vx.Volume):
+            data = obj.tensor.movedim(0, -1).cpu().detach().numpy()
+            matrix = obj.geometry.tensor.cpu().detach().numpy()
+            geometry = ImageGeometry(data.shape[:3], vox2world=matrix)
+            return Volume(data, geometry=geometry)
+    except ImportError:
+        pass
+
+    # as a final test, check if the input is a nibabel image
     try:
         import nibabel as nib
         if isinstance(obj, nib.spatialimages.SpatialImage):
-            data = obj.get_fdata(caching="unchanged").copy()
+            data = obj.get_data().copy()
             geometry = ImageGeometry(data.shape[:3], vox2world=obj.affine)
             return Volume(data, geometry=geometry)
     except ImportError:
@@ -757,7 +1067,7 @@ def cast_slice(obj, allow_none=True, copy=False):
     try:
         import nibabel as nib
         if isinstance(obj, nib.spatialimages.SpatialImage):
-            data = obj.get_fdata(caching="unchanged").copy()
+            data = obj.get_data().copy()
             geometry = ImageGeometry(data.shape[:3], vox2world=obj.affine)
             return Slice(data, geometry=geometry)
     except ImportError:

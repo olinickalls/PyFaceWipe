@@ -3,8 +3,7 @@ import torch
 import warnings  # used only to suppress warnings in torch
 import torch.nn as nn
 import numpy as np
-from . import surfa as sf
-# import surfa as sf
+from pyfacewipe import surfa as sf
 import scipy.ndimage
 import nibabel as nib
 from pathlib import Path
@@ -159,7 +158,13 @@ class SynthStrip():
         in_vol -= in_vol.min()
         # percentile99 = np.percentile(in_vol, 99, method='nearest')
         # numpy 1.16.4 has 'interpolation', not 'method'
-        percentile99 = np.percentile(in_vol, 99, interpolation='nearest')
+
+        try:  # Numpy >= 1.22 supports 'method' instead of 'interpolation'
+            percentile99 = np.percentile(in_vol, 99, method='nearest')
+
+        except TypeError:  # Numpy < 1.22 uses 'interpolation' instead of 'method'
+            percentile99 = np.percentile(in_vol, 99, interpolation='nearest')
+
         in_vol = (in_vol / percentile99).clip(0, 1)
 
         # ###########################################################

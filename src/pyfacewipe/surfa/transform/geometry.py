@@ -16,7 +16,7 @@ class ImageGeometry:
     def __init__(self, shape, voxsize=None, rotation=None, center=None, shear=None, vox2world=None):
         """
 
-        Defines the correspondence between voxel coordinates and world coordinates for an image.
+        Defines the correspondence between voxel coordinates and "world" coordinates, eg, RAS, for an image.
 
         This correspondence can be represented by either a singular affine (voxel-to-world
         transform matrix) or a set of linear components (voxel scale, position, rotation,
@@ -161,7 +161,7 @@ class ImageGeometry:
             elif not np.allclose(scale, voxsize, atol=1e-3, rtol=0.0):
                 warnings.warn(f'voxel size {voxsize} differs substantially from the computed vox2world scale {scale}')
 
-        # now we have enough information to compute the missing affine (MOVE THIS ABOVE AS WELL)
+        # now we have enough information to compute the missing affine
         if vox2world is None:
             self._vox2world = compose_centered_affine(self.shape, voxsize, rotation, center, shear)
         else:
@@ -299,8 +299,11 @@ class ImageGeometry:
 
     @property
     def vox2surf(self):
-        """
-        Affine transform that maps voxel (image) to surface coordinates.
+        """Affine transform that maps voxel (image) to surface
+        coordinates. Surface coordinates are centered near the center
+        of the volume and aligned with the voxel coordinates in LIA
+        rotation.
+
         """
         def func():
             rot = orientation_to_rotation_matrix('LIA')
@@ -331,6 +334,18 @@ class ImageGeometry:
         func = lambda : self.vox2world @ self.surf2vox
         return self._retrieve_or_compute_affine('sw', func)
 
+    @property
+    def vox2vxm(self):
+        # voxel morph centers the col,row,slice
+        M = np.eye(4)
+        M[:3,3] = -((np.array(self._shape) - 1) / 2)
+
+        return(Affine(M))
+
+    @property
+    def vxm2vox(self):
+        return(self.vox2vxm.inv())
+
     def _retrieve_or_compute_affine(self, name, func):
         """
         Internal utility to compute and cache affine matrices when called.
@@ -359,6 +374,7 @@ class ImageGeometry:
         Affine
             Retrieved affine.
         """
+        # Andrew, what were you thinking?
         a = str(cast_space(source))[0]
         b = str(cast_space(target))[0]
         # lets use the first character of the space for a quick lookup
@@ -381,6 +397,24 @@ class ImageGeometry:
         """
         return rotation_matrix_to_orientation(self.rotation)
 
+    def shearless_components(self):
+        """
+        Decompose the image-to-world affine into image geometry
+        parameters that don't account for shear.
+
+        Returns
+        -------
+        tuple
+            Tuple containing (voxelsize, rotation matrix, world-center) parameters.
+        """
+        if np.any(np.abs(self.shear > 1e-5)):
+            center = np.matmul(self.vox2world, np.append(np.asarray(self.shape) / 2, 1))[:3]
+            voxsize = np.linalg.norm(self.vox2world[:, :3], axis=0)
+            rotation = self.vox2world[:3, :3] / voxsize
+            return (voxsize, rotation, center)
+        else:
+            return (self.voxsize, self.rotation, self.center)
+
 
 def decompose_centered_affine(shape, affine):
     """
@@ -398,8 +432,8 @@ def decompose_centered_affine(shape, affine):
     tuple
         Tuple containing (voxelsize, rotation matrix, world-center, shear) parameters.
     """
-    center = np.matmul(affine.matrix, np.append(np.asarray(shape) / 2, 1))[:3]
-    q, r = np.linalg.qr(affine.matrix[:3, :3])
+    center = np.matmul(affine, np.append(np.asarray(shape) / 2, 1))[:3]
+    q, r = np.linalg.qr(affine[:3, :3])
     di = np.diag_indices(3)
     voxsize = np.abs(r[di])
     p = np.eye(3)
