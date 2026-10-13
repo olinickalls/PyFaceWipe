@@ -211,3 +211,5 @@ __marimo__/
 
 # Local virtual environments
 .venv*/
+myMRIdefaced/
+myMRIdefaced/axT2.nii.gz

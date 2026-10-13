@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "PyFaceWipe"
-version = "0.1.2"
+dynamic = ["version"]
 description = "MRI defacer for multiple sequences."
 readme = "README.md"
 license = {text = "Free for non-commercial use only."}
@@ -67,6 +67,9 @@ Homepage = "https://doi.org/10.1007/s10334-024-01170-x"
 [tool.setuptools]
 package-dir = {"" = "src"}
 include-package-data = true
+
+[tool.setuptools.dynamic]
+version = {attr = "pyfacewipe._version.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

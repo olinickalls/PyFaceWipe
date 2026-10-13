@@ -1,6 +1,6 @@
 __all__ = ["main.PyFaceWipe"]
 
-__version__ = '0.1.1'
+from ._version import __version__
 
 try:
     import torch  # noqa: F401
