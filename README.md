@@ -26,9 +26,9 @@ Magn Reson Mater Phy (2024).
 ## Prerequisites
 
 Before you begin, ensure you have met the following requirements:
-* Python 3.10 - 3.12.
+* Python 3.12 - 3.14.
 * Windows, Linux & Mac supported, see [Platform notes](#platform-notes).
-* NumPy 1.x is required (`numpy<2`) because of the vendored `surfa` package.
+* NumPy 2 and Nibabel 5 supported
 
 ## Installation
 
@@ -38,7 +38,7 @@ PyFaceWipe is managed with [uv](https://docs.astral.sh/uv/). From a checkout, wi
 uv run testrun.py
 ```
 
-uv picks a supported Python (3.10 - 3.12), installs the right dependencies for your platform,
+uv picks a supported Python (3.12-3.14), installs the right dependencies for your platform,
 compiles the Cython extension, and runs the script. You need a C compiler for the compile
 step (Visual Studio Build Tools on Windows, Xcode command line tools on macOS). On Debian/Ubuntu
 (including a fresh WSL install, which has none) run `sudo apt install build-essential` first;
@@ -46,7 +46,7 @@ without it the build fails with `No such file or directory: 'cc'`.
 
 To run the tests: `uv run pytest`
 
-Without uv: `python -m pip install .` (Python 3.10 - 3.12).
+Without uv: `python -m pip install .` (Python 3.12 - 3.14).
 
 ## Platform notes
 
@@ -56,7 +56,6 @@ Without uv: `python -m pip install .` (Python 3.10 - 3.12).
 | Linux x86_64 | Supported. Needs glibc 2.28 or newer (Ubuntu 20.04+, Debian 10+), which current PyTorch requires. |
 | macOS Apple Silicon | Supported. Wheels are built in CI. |
 
-* NumPy 1.x only (`numpy<2`), so Python 3.13+ is not supported yet. NumPy 2 support depends on updating the vendored `surfa` package. This is due for the next release.
 
 ### CPU vs CUDA PyTorch
 
@@ -96,75 +95,6 @@ python -m pip install -r requirements.txt
 ```
 
 
-## Publishing GitHub release assets
-
-These workflows attach distributions to GitHub Releases; they do not publish to PyPI.
-
-### New releases
-
-1. Update `version` in `pyproject.toml`, commit, and create and push the matching
-   version tag (for example `v0.1.3`).
-2. Pushing a `v*` tag automatically starts **Build Wheels and Store Assets**, which
-   calls **Build Wheels** to build and test the CPU wheels for Linux, Windows and
-   macOS, the Linux CUDA wheels, and the source distribution.
-3. Only after all builds succeed, the publishing job creates or updates the
-   tagged release and uploads its distributions. Ordinary branch builds only
-   save Actions artifacts; they do not publish releases.
-
-### Build and store assets for an existing tag
-
-Open **Actions → Build Wheels and Store Assets → Run workflow**, select `main`,
-enter the existing `release_tag` (for example `v0.1.2`), and run. No build run ID
-or source SHA is needed. This creates fresh distributions from the tag's immutable
-commit and uploads those exact artifacts from the same run after every build
-succeeds. The publisher verifies the recorded source against the tag and rejects
-moved tags before changing the release.
-
-**Build Wheels** remains available for standalone builds and normal branch CI.
-Its manual dispatch now builds the selected tag and saves Actions artifacts only;
-it no longer publishes. Tag pushes run only the new orchestration workflow, avoiding
-duplicate builds and uploads.
-
-### Advanced backfill using existing artifacts
-
-If artifacts are still available, open **Actions → Release Assets → Run workflow**.
-Select `main` (which contains the current publishing workflow), enter the exact
-`release_tag`, such as `v0.1.2`, and a successful **Build Wheels** or
-**Build Wheels and Store Assets** `build_run_id`
-(the number in its `/actions/runs/<number>` URL).
-
-The publisher checks that the run belongs to one of this repository's trusted build workflows,
-succeeded, and built the commit currently referenced by the tag. New builds record
-their checked-out source in a `release-source` artifact; older builds are checked
-against the run's commit. All four wheel artifacts and the source distribution must
-be available and nonempty. Missing/expired artifacts cause an error before any
-release is changed. Supplying a source SHA cannot substitute for missing provenance
-or make artifacts from the wrong commit valid; use a fresh build instead.
-
-Alternatively, download and extract the artifacts from that verified build run
-and attach the missing `.whl` files using the release's **Edit** page.
-
-### Rebuild when artifacts have expired
-
-Open **Actions → Build Wheels and Store Assets → Run workflow**, select `main`, and enter the
-existing `release_tag`. The build checks out that tag's commit, not `main`, then
-builds, tests and publishes its distributions. Manual rebuilds require the tagged
-commit to be reachable from the default branch, so unmerged code cannot run in
-that branch's cache context. Build commands also have Actions runtime/cache
-credentials cleared. The tagged source must support the
-current build steps, including `scripts/set_variant.py` and the package layout.
-Tags predating that build layout may need a version-specific build process.
-Do not move an existing release tag to newer code just to rebuild it.
-
-Both publishing workflows preserve existing assets by default. Enable
-`replace_existing` only when deliberately replacing files with matching names.
-The optional `draft` setting applies only when creating a release; it never
-changes an existing release's publication status. Inspect a draft before publishing
-it through GitHub's release UI. Publishing is serialized per release tag, and only
-the publishing job has release-write permission.
-
-If publishing fails after a successful build, rerun the failed publishing job;
-the default missing-only uploads safely resume a partial upload.
 
 ## Release History
 
