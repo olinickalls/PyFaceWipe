@@ -1,18 +1,23 @@
 import os
 import shutil
 import tempfile
-import numpy as np
+import inspect
 
 from pyfacewipe.surfa import Mesh
+from pyfacewipe.surfa import LabelLookup
+from pyfacewipe.surfa import load_volume
+from pyfacewipe.surfa import load_mesh
 from pyfacewipe.surfa.system import run
 from pyfacewipe.surfa.system import collect_output
 from pyfacewipe.surfa.image import cast_image
 from pyfacewipe.surfa.mesh import cast_overlay
+from pyfacewipe.surfa.mesh import cast_mesh
+from pyfacewipe.surfa.mesh import is_mesh_castable
 
 
 class Freeview:
 
-    def __init__(self, title=None, debug=False):
+    def __init__(self, title=None, debug=False, use_vglrun=True, return_edits=False):
         """
         A visualization class that wraps the `freeview` command.
 
@@ -25,13 +30,29 @@ class Freeview:
             fv.add_mesh(mesh, overlay=overlay)
             fv.show()
 
+        To reload the data visualized inf FreeView after the viewer closes, specify
+        'return_edits=True' and assign the return value of fv.show() to be a variable:
+
+            fv = Freeview(return_edits=True)
+            fv.add_image(img)
+            fv_contents = fv.show()
+
+        This will return a tuple of lists, with the first list containing volumes and
+        the second list containing any data added to the viewer via fv.add_mesh(mesh).
+        Items will be returned in the order that they are added to FreeView.
+
         For a quicker but more limited way to wrap freeview, see the `fv()` function.
         """
         self.tempdir = None
         self.debug = debug
         self.title = title
         self.isshown = False
+        self.use_vglrun = use_vglrun
         self.arguments = []
+        self._return_edits = return_edits
+        self._vols = []
+        self._meshes = []
+        
 
         # first check if freeview is even accessible
         self.fvpath = shutil.which('freeview')
@@ -71,16 +92,21 @@ class Freeview:
                 return
             filename = img
         else:
+            name = _guess_var_name(img)
+            name = name if name is not None else 'image'
             img = cast_image(img, allow_none=False)
-            filename = _unique_filename('image', '.mgz', self.tempdir)
+            filename = _unique_filename(name, '.mgz', self.tempdir)
             img.save(filename)
             if self.debug:
                 print(f'wrote image to {filename}')
+        
+        # add the path to the temp vol to the internal list of volumes
+        self._vols.append(filename)
 
         # configure the corresponding freeview argument
         self.arguments.append('-v ' + filename + _convert_kwargs_to_tags(kwargs))
 
-    def add_mesh(self, mesh, overlay=None, annot=None, **kwargs):
+    def add_mesh(self, mesh, curvature=None, overlay=None, annot=None, name=None, **kwargs):
         """
         Adds an image to the freeview window. Any key/value tags allowed as a `-v` option
         in the freeview command line can be provided as an additional argument.
@@ -102,16 +128,26 @@ class Freeview:
                 print(f'freeview error: mesh file {mesh} does not exist')
                 return
             mesh_filename = mesh
-        elif isinstance(mesh, Mesh):
-            mesh_filename = _unique_filename('mesh', '', self.tempdir)
+        else:
+            mesh = cast_mesh(mesh, allow_none=False)
+            mesh_filename = _unique_filename('mesh', 'srf', self.tempdir)
             mesh.save(mesh_filename)
             if self.debug:
                 print(f'wrote mesh to {mesh_filename}')
-        else:
-            raise ValueError(f'expected type Mesh to add_mesh, but got type {mesh.__class__.__name__}')
 
         # extra tags for the mesh
         tags = ''
+
+        # configure any curvatures
+        if curvature is not None:
+            curvature = [curvature] if not isinstance(curvature, (list, tuple)) else curvature
+            for c in curvature:
+                c = FreeviewCurvature(c) if not isinstance(c, FreeviewCurvature) else c
+                filename = _unique_filename(c.name, '.mgz', self.tempdir)
+                c.arr.save(filename)
+                if self.debug:
+                    print(f'wrote curvature to {filename}')
+                tags += f':curvature={filename}' + c.tags()
 
         # configure any overlays
         if overlay is not None:
@@ -134,6 +170,12 @@ class Freeview:
                 if self.debug:
                     print(f'wrote annotation to {filename}')
                 tags += f':annot={filename}'
+
+        if name is not None:
+            tags += f':name={name}'
+        
+        # add the path to the temp mesh to the internal list of meshes
+        self._meshes.append(mesh_filename)
 
         # configure the corresponding freeview argument
         self.arguments.append('-f ' + mesh_filename + tags + _convert_kwargs_to_tags(kwargs))
@@ -160,7 +202,9 @@ class Freeview:
         threads : int
             Number of OMP threads available to FreeView.
         """
-
+        # set background based on _return_edits
+        background = background if not self._return_edits else False
+        
         # compile the command
         command = self.fvpath + ' ' + ' '.join(self.arguments)
 
@@ -170,13 +214,16 @@ class Freeview:
             command = f'{command} -subtitle "{title}"'
 
         # be sure to remove the temporary directory (if it exists) after freeview closes
-        command = f'{command} ; rm -rf {self.tempdir}'
+        # need the tempdir if saving edits
+        if not self._return_edits:
+            command = f'{command} ; rm -rf {self.tempdir}'
 
         # freeview can be buggy when run remotely, so let's test if VGL is
         # available to wrap the process
-        vgl = _find_vgl()
-        if vgl is not None:
-            command = f'{vgl} {command}'
+        if self.use_vglrun:
+            vgl = _find_vgl()
+            if vgl is not None:
+                command = f'{vgl} {command}'
 
         # set number of OMP threads if provided
         if threads is not None:
@@ -190,12 +237,149 @@ class Freeview:
         self.isshown = True
 
         # run it
-        run(command, background=background)
+        ret_code = run(command, background=background)
+
+        # reload the vol/mesh data before deleting the tempdir, if necessary
+        if self._return_edits:
+            print('Reloading temp volumes into surfa')
+            vols = [load_volume(x) for x in self._vols]
+            meshes = [load_mesh(x) for x in self._meshes]
+           
+            # clean up the tempdir
+            shutil.rmtree(self.tempdir)
+
+            return vols, meshes
+
+    ### Methods for 'parity' with the legacy freesurfer module
+    def vol(self, volume, swap_batch_dim=False, lut=None, **kwargs):
+        """
+        TODO: wlrite the doc strings
+        """
+        # handle the lut, if vol path is passed, don't change what's on disk,
+        # just add the lut via the fv CLI opts
+        _lut_flag = None
+        if lut is not None:
+            # if file path, make sure it exists or is in the luts/ dir
+            if isinstance(lut, str):
+                if not os.path.isfile(lut):
+                    _lut = os.path.join(os.environ.get('FREESURFER_HOME'), f'luts/{lut}')
+                    if os.path.isfile(_lut):
+                        lut = _lut
+                    else:
+                        print(f'freeview error: specified lookup {lut} could not be located.')
+                        return
+                _lut_flag = f':lut={lut}'
+
+            # if LabelLookup object, save as temp file
+            elif isinstance(lut, LabelLookup):
+                _lut_file = _unique_filename('lut','.txt', self.tempdir)
+                if self.debug:
+                    print(f'Wrote lut to {_lut_file}')
+                lut.save(_lut_file)
+                _lut_flag = f':lut={_lut_file}'
+            
+            # if not file of LabelLookup, invalid lut
+            else:
+                print(f'freeview error: specified lut type {lut.type} not valid, must be of type str or LabelLookup')
+                return
+
+        # check if we have a file path or vol-like object
+        if isinstance(volume, str):
+            if not os.path.isfile(volume):
+                print(f'freeview error: image file {volume} does not exist')
+                return
+            filename = volume
+
+        else:
+            name = _guess_var_name(volume)
+            name = name if name is not None else 'image'
+            img = cast_image(volume, allow_none=False)
+            filename = _unique_filename(name, '.mgz', self.tempdir)
+            img.save(filename)
+            if self.debug:
+                print(f'wrote image to {filename}')        
+
+        # append temp vol to internal list of vols
+        self._vols.append(filename)
+
+        # configure the corresponding freeview argument
+        _fv_arg = '-v ' + filename + _convert_kwargs_to_tags(kwargs)
+        # set colormap=lut if a lut is passed
+        if _lut_flag is not None:
+            _fv_arg += ':colormap=lut'
+        if self.debug:
+            print(f'Adding to freeview CLI call: {_fv_arg}')
+        self.arguments.append(_fv_arg)
+
+    def surf(self, surface, overlay=None, annot=None, mrisp=None, sphere=None, curvature=None, **kwargs):
+        """
+        TODO: wlrite the doc strings
+        """
+        mrisp_filepath = None
+        sphere_filepath = None
+
+        # if we have an mrisp, handle that and pass to kwargs of add_mesh
+        if mrisp is not None:
+            mrisps = list(mrisp) if isinstance(mrisp, (list,tuple)) else [overlay]
+            for mrisp in mrisps:
+                # handle file name case
+                if isinstance(mrisp, str):
+                    if not os.path.isfile(mrisp):
+                        print(f'freeview error: the mrisp file {mrisp} could not be located')
+                        return
+                    mrisp_filepath = mrisp
+                else:
+                    _mrisp = cast_image(mrisp, allow_none=False)
+                    mrisp_filepath = _unique_filename('mrisp','.mgz', self.tempdir)
+                    _mrisp.save(mrisp_filepath)
+
+                # hack to exploit kwargs to tags functionality to stack mrisp files
+                if 'mrisp' in kwargs:
+                    kwargs['mrisp'] += f':mrisp={mrisp_filepath}'
+                else:
+                    kwargs['mrisp'] = mrisp_filepath
+        
+        if sphere is not None:
+            spheres = list(sphere) if isinstance(sphere, (list,tuple)) else [sphere]
+            for sphere in spheres:
+                if isinstance(sphere, str):
+                    if not os.path.isfile(sphere):
+                        print(f'freeview error: the sphere file {sphere} could not be located')
+                        return
+                    sphere_filepath = sphere
+                else:
+                    _sphere = cast_mesh(sphere, allow_none=False)
+                    sphere_filepath = _unique_filename('sphere', 'sph', self.tempdir)
+                    _sphere.save(sphere_filepath)
+                
+                # hack to exploit kwargs to tags functionality to stack sphere files
+                if 'sphere' in kwargs:
+                    kwargs['sphere'] += f':sphere={sphere_filepath}'
+                else:
+                    kwargs['sphere'] = sphere_filepath
+        
+        self.add_mesh(surface, curvature=curvature, overlay=overlay, annot=annot, **kwargs)
+
+
+class FreeviewCurvature:
+
+    def __init__(self, arr, name='curvature', method='binary'):
+        """
+        Configuration for freeview curvature.
+        """
+        self.arr = cast_overlay(arr, allow_none=False)
+        self.name = name
+        self.method = method
+
+    def tags(self):
+        tags = ''
+        tags += '' if self.method is None else f':curvature_method={self.method}'
+        return tags
 
 
 class FreeviewOverlay:
 
-    def __init__(self, arr, name='overlay', threshold=None, opacity=None):
+    def __init__(self, arr, name='overlay', threshold=None, opacity=None, color=None, custom=None):
         """
         Configuration for freeview overlays.
         """
@@ -203,11 +387,15 @@ class FreeviewOverlay:
         self.name = name
         self.threshold = threshold
         self.opacity = opacity
+        self.color = color
+        self.custom = custom
 
     def tags(self):
         tags = ''
-        tags += '' if self.threshold is None else f':overlay_threshold=' + ','.join(str(x) for x in config.threshold)
+        tags += '' if self.threshold is None else f':overlay_threshold=' + ','.join(str(x) for x in self.threshold)
         tags += '' if self.opacity is None else f':overlay_opacity={self.opacity}'
+        tags += '' if self.color is None else f':overlay_color={self.color}'
+        tags += '' if self.custom is None else f':overlay_custom={self.custom}'
         return tags
 
 
@@ -223,7 +411,7 @@ class FreeviewAnnot:
 
 def fv(*args, **kwargs):
     """
-    Freeview wrapper to quickly load an arbitray number of elements. Inputs
+    Freeview wrapper to quickly load an arbitrary number of elements. Inputs
     can be existing filenames, images, meshes, or numpy arrays. Lists
     are also supported. Use the `Freeview` class directly to configure a
     more advanced session.
@@ -250,13 +438,13 @@ def fv(*args, **kwargs):
 
     # cycle through arguments
     for arg in flatten(args):
-        if isinstance(arg, Mesh):
+        if is_mesh_castable(arg):
             fv.add_mesh(arg)
         else:
             fv.add_image(arg)
 
     # show the window
-    fv.show(background=background)
+    return fv.show(background=background)
 
 
 def _find_vgl():
@@ -264,6 +452,8 @@ def _find_vgl():
     Locate the VGL wrapper if installed.
     """
     have_key = os.path.isfile('/etc/opt/VirtualGL/vgl_xauth_key')
+    # test for egl support
+    has_egl = os.path.isfile('/opt/VirtualGL/bin/eglinfo')
     vgl_path = shutil.which('vglrun')
     if vgl_path is None:
         vgl_path = shutil.which('vglrun', path='/usr/pubsw/bin')
@@ -271,7 +461,10 @@ def _find_vgl():
         return None
     islocal = any([os.environ.get('DISPLAY', '').endswith(string) for string in (':0', ':0.0')])
     no_glx = 'NV-GLX' in collect_output('xdpyinfo')[0]
-    if not islocal and not nvglx:
+    if not islocal and not no_glx:
+        # add flag for egl if supported
+        if has_egl:
+            vgl_path = vgl_path + ' -d egl'
         return vgl_path
     return None
 
@@ -280,12 +473,12 @@ def _convert_kwargs_to_tags(kwargs):
     """
     Converts a kwargs dictionary to freeview key/value tags
     """
-    tags = ''
+    tags = kwargs.pop('opts', '')
     for key, value in kwargs.items():
         if isinstance(value, (list, tuple)):
             value = ','.join(str(x) for x in value)
         if value is not None:
-            vale = value.replace(' ', '-')
+            value = value.replace(' ', '-')
             tags += f':{key}={value}'
     return tags
 
@@ -309,3 +502,30 @@ def _unique_filename(filename, extension, directory):
         if not os.path.exists(fullpath):
             return fullpath
     raise RuntimeError(f'could not generate a unique filename for {filename} after trying many times')
+
+def _guess_var_name(var):
+    """
+    Attempt to find name of variable passed by finding first non-surfa frame in
+    the call stack and checking the value of variables against what is passed to
+    this function.
+    Note: This could be exceptionally slow if there are a lot of locals in the
+          frame, or the comparison operation is expensive.
+    """
+    # get the current frame from the call stack
+    frame = inspect.currentframe()
+    try:
+        # try to trace back the call stack until we're outside of surfa,
+        # where the user passed in the var to visualize
+        while frame is not None and frame.f_globals.get('__name__','').startswith('surfa'):
+            frame = frame.f_back
+        # if we run out of frames, return None
+        if frame is None:
+            return None
+        # process the first non-surfa frame
+        for name, val in frame.f_locals.items():
+            if val is var and not name.startswith('_'):
+                return name
+    except Exception:
+        print('Failed to deduce variable name, falling back on generic default.')
+    finally:
+        del frame

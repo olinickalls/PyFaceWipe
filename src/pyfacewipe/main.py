@@ -2,6 +2,7 @@ import os
 import platform
 from pathlib import Path
 from .synthstrip_class import SynthStrip
+from ._version import __version__
 import medio
 import nibabel as nib
 import numpy as np
@@ -26,7 +27,8 @@ class PyFaceWipe:
         disable_itk_warnings: bool = True,
         verbose: bool = False,
     ):
-        print("==========\nPyFaceWipe\n==========")
+        self.__version__ = __version__
+        print(f"==========\nPyFaceWipe {self.__version__}\n==========")
         print(description)
         # See synthstrip_class.py for all available arguments
         self.strip = SynthStrip(
